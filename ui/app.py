@@ -150,11 +150,20 @@ def analyse(plan_json, fdw_ready):
     def rows_of(n):
         return n["actual_rows"] if n["actual_rows"] is not None else n["plan_rows"]
 
+    # Whether these row counts were measured or guessed. Without ANALYZE they are
+    # `Plan Rows`, i.e. the planner's estimate — and for a foreign scan that is
+    # the wrapper's default guess, which pg_clickhouse puts at a flat 1000. A
+    # fully pushed-down count(*) returns one row and gets reported as a thousand;
+    # a local scan of 521,872 rows was estimated at 217,447. Both are the right
+    # order of magnitude for the argument this page makes, and neither is a
+    # measurement, so the page has to say which it is showing.
+    estimated = all(n["actual_rows"] is None for n in nodes)
+
     # The widest point of the plan — how many rows this side had to put through
     # a join, a sort or an aggregate. Against the number that crossed the wire
     # it is the whole argument: 3.4M sorted here, or 15 rows fetched.
     widest = max((rows_of(n) or 0) for n in nodes) if nodes else 0
-    base = {"rows_widest": widest, "nodes": nodes}
+    base = {"rows_widest": widest, "rows_estimated": estimated, "nodes": nodes}
 
     if not foreign:
         return dict(base,

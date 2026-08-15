@@ -39,9 +39,20 @@ Two things change, and only one of them is the point:
 - the **badge** — `ran on Postgres` / `ran on ClickHouse`
 - the **row counts** — how many rows crossed the wire against how many the widest plan node handled
 
-That second pair is the argument. *3.4M rows sorted here* versus *20 rows
-fetched* says something a duration cannot. Expand **Remote SQL** to see the
-exact text that went to ClickHouse.
+That second pair is the argument. *A few hundred thousand rows handled here*
+versus *a handful fetched* says something a duration cannot. Expand **Remote
+SQL** to see the exact text that went to ClickHouse.
+
+!!! warning "Those two numbers are estimates, and the page marks them `~`"
+    They come from `EXPLAIN` without `ANALYZE`, so they are `Plan Rows` — the
+    planner's guess. For a foreign scan the guess is the wrapper's flat default,
+    which `pg_clickhouse` puts at **1000** however many rows actually cross. A
+    fully pushed-down `count(*)` returns one row and gets reported as a thousand.
+
+    The right order of magnitude is enough to make the argument, and the ratio
+    is real. But if you want the measured number, run `EXPLAIN (ANALYZE)`
+    yourself — and notice that the dashboard does not, because that would mean
+    executing every query twice.
 
 !!! tip "If the switch is not there"
     The side switch only appears once `FOREIGN_SCHEMA` is set and foreign

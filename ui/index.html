@@ -230,9 +230,15 @@ function verdict(el, ran, extra) {
   const [cls, label] = map[ran.verdict] || ['b-none', ran.where];
   let bits = `<span class="badge ${cls}">${label}</span>
               <span class="detail">${ran.detail}</span>`;
-  if (ran.rows_crossed !== null && ran.rows_crossed !== undefined)
-    bits += `<span class="detail">· ${fmt(ran.rows_crossed)} rows crossed the wire
-             vs ${fmt(ran.rows_widest)} at the widest plan node</span>`;
+  // "~" because without ANALYZE these are planner estimates, not measurements —
+  // and for a foreign scan the estimate is the wrapper's flat default. Saying so
+  // costs one character and keeps the page honest about its own numbers.
+  if (ran.rows_crossed !== null && ran.rows_crossed !== undefined) {
+    const t = ran.rows_estimated ? '~' : '';
+    bits += `<span class="detail">· ${t}${fmt(ran.rows_crossed)} rows crossed the wire
+             vs ${t}${fmt(ran.rows_widest)} at the widest plan node${
+             ran.rows_estimated ? ' (planner estimates, not measured)' : ''}</span>`;
+  }
   if (extra) bits += `<span class="detail">· ${extra}</span>`;
   el.innerHTML = bits;
 }
@@ -246,8 +252,9 @@ const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;'
 const LOCAL_WORK = ['Aggregate','GroupAggregate','HashAggregate','WindowAgg','Sort',
                     'Incremental Sort','Hash Join','Merge Join','Nested Loop','Group','Unique'];
 
-function planTree(el, nodes) {
+function planTree(el, nodes, estimated) {
   if (!nodes || !nodes.length) { el.textContent = '(no plan)'; return; }
+  const pfx = estimated ? '~' : '';
   el.innerHTML = nodes.map(n => {
     const pad = '  '.repeat(n.depth);
     const arrow = n.depth ? '-> ' : '';
@@ -255,7 +262,7 @@ function planTree(el, nodes) {
     const rows = n.actual_rows ?? n.plan_rows;
     const bits = [];
     if (n.relation) bits.push('on ' + n.relation);
-    if (rows !== null && rows !== undefined) bits.push('rows=' + fmt(rows));
+    if (rows !== null && rows !== undefined) bits.push('rows=' + pfx + fmt(rows));
     if (n.remote) bits.push('REMOTE');
     return `<div class="pn">${pad}${arrow}<span class="${cls}">${esc(n.type)}</span>`
          + (bits.length ? ` <span class="n">${esc(bits.join(' · '))}</span>` : '') + `</div>`;
@@ -477,7 +484,7 @@ async function loadAgg(key) {
     $('#aggNote').textContent = d.note;
     $('#aggSql').textContent = d.sql;
     $('#aggRemote').textContent = d.ran.remote_sql || '(nothing was sent remotely)';
-    planTree($('#aggPlan'), d.ran.nodes);
+    planTree($('#aggPlan'), d.ran.nodes, d.ran.rows_estimated);
     verdict($('#aggVerdict'), d.ran, `${d.ms} ms · schema <code>${d.schema}</code>`);
     const num = i => d.rows.length && !isNaN(Number(d.rows[0][i])) && d.rows[0][i] !== '';
     $('#aggTable').innerHTML =
@@ -537,7 +544,7 @@ async function labRun() {
     }).join('');
     d.results.filter(r => !r.error).forEach(r => {
       verdict($(`.verdict[data-v="${r.side}"]`), r.ran, `${r.ms} ms`);
-      planTree($(`.plan[data-p="${r.side}"]`), r.ran.nodes);
+      planTree($(`.plan[data-p="${r.side}"]`), r.ran.nodes, r.ran.rows_estimated);
     });
     $('#labStatus').textContent = d.results.map(r =>
       `${r.side === 'foreign' ? 'ClickHouse' : 'Postgres'} ${r.error ? 'failed' : r.ms + ' ms'}`

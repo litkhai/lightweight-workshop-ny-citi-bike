@@ -89,6 +89,14 @@ Alongside the verdict, each plan yields two numbers that carry the argument:
 **rows crossed** (summed over the foreign scans) against **widest node** (the
 most rows any single node handled).
 
+Both are **planner estimates**, and `rows_estimated` says so: the page runs
+`EXPLAIN` without `ANALYZE`, so these are `Plan Rows`. For a foreign scan that is
+the wrapper's default guess — `pg_clickhouse` reports a flat 1000 regardless — so
+a pushed-down `count(*)` that really returns one row is shown as a thousand. The
+ratio still carries the point; the absolute numbers are not measurements, and the
+UI prefixes them with `~` rather than pretending otherwise. Getting actuals would
+mean `ANALYZE`, and therefore executing every query twice.
+
 ## Three decisions worth knowing
 
 **Client-side parameter binding** (`ClientCursor`). Partly so the SQL the page
