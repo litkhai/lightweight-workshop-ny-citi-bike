@@ -15,9 +15,9 @@
 -- convex hull of the network so the edge cells do not run off to infinity.
 WITH cells AS (
     SELECT (ST_Dump(ST_VoronoiPolygons(ST_Collect(geom)))).geom AS cell
-    FROM citibike.stations
+    FROM ny_citibike.stations
 ), hull AS (
-    SELECT ST_ConvexHull(ST_Collect(geom)) AS h FROM citibike.stations
+    SELECT ST_ConvexHull(ST_Collect(geom)) AS h FROM ny_citibike.stations
 )
 SELECT s.name,
        s.capacity,
@@ -25,7 +25,7 @@ SELECT s.name,
            AS service_km2
 FROM cells c
 CROSS JOIN hull
-JOIN citibike.stations s ON ST_Within(s.geom, c.cell)
+JOIN ny_citibike.stations s ON ST_Within(s.geom, c.cell)
 ORDER BY service_km2 DESC
 LIMIT 10;
 
@@ -34,13 +34,13 @@ LIMIT 10;
 -- The <-> operator is an index-assisted KNN search against the GiST index.
 -- There is no way to express this without the index and the geometry type.
 WITH anchor AS (
-    SELECT geom, name FROM citibike.stations ORDER BY capacity DESC NULLS LAST LIMIT 1
+    SELECT geom, name FROM ny_citibike.stations ORDER BY capacity DESC NULLS LAST LIMIT 1
 )
 SELECT a.name AS busiest_station,
        s.name AS alternative,
        round(ST_Distance(a.geom::geography, s.geom::geography)::numeric) AS metres
 FROM anchor a
-JOIN citibike.stations s ON s.geom <> a.geom
+JOIN ny_citibike.stations s ON s.geom <> a.geom
 ORDER BY a.geom <-> s.geom
 LIMIT 5;
 
@@ -53,7 +53,7 @@ SELECT round((ST_Area(ST_ConvexHull(ST_Collect(geom))::geography) / 1e6)::numeri
        count(*) AS stations,
        round((count(*) / (ST_Area(ST_ConvexHull(ST_Collect(geom))::geography) / 1e6))::numeric, 2)
            AS stations_per_km2
-FROM citibike.stations;
+FROM ny_citibike.stations;
 
 \echo ''
 \echo '=== 4. Density clusters: DBSCAN over the station points ==='
@@ -63,7 +63,7 @@ WITH clustered AS (
     SELECT name,
            ST_ClusterDBSCAN(ST_Transform(geom, 3857), eps := 400, minpoints := 5)
                OVER () AS cluster_id
-    FROM citibike.stations
+    FROM ny_citibike.stations
 )
 SELECT coalesce(cluster_id::text, 'unclustered') AS cluster,
        count(*) AS stations
@@ -79,7 +79,7 @@ LIMIT 10;
 -- what cannot. The join key is a bigint, so the two halves can live apart.
 WITH latest AS (
     SELECT DISTINCT ON (station_key) station_key, num_bikes_available, num_docks_available
-    FROM citibike.station_status
+    FROM ny_citibike.station_status
     ORDER BY station_key, polled_at DESC
 )
 SELECT s.name,
@@ -87,7 +87,7 @@ SELECT s.name,
        l.num_docks_available AS docks,
        ST_AsText(ST_SnapToGrid(s.geom, 0.0001)) AS point
 FROM latest l
-JOIN citibike.stations s USING (station_key)
+JOIN ny_citibike.stations s USING (station_key)
 WHERE l.num_bikes_available = 0
 ORDER BY s.capacity DESC NULLS LAST
 LIMIT 10;

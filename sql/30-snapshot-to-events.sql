@@ -15,14 +15,14 @@
 -- them: change the partition or the ordering and the index stops covering it,
 -- and then you get the sort. Module 06 spells that out.
 --
---   ./scripts/psql.sh -v s=citibike -f /sql/30-snapshot-to-events.sql
+--   ./scripts/psql.sh -v s=ny_citibike -f /sql/30-snapshot-to-events.sql
 --
 -- On ClickHouse the ordering is the table's own storage order, so the shapes
 -- that fall off the Postgres index degrade far more gently there.
 
 \if :{?s}
 \else
-  \set s citibike
+  \set s ny_citibike
 \endif
 
 \echo ''

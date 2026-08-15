@@ -17,7 +17,7 @@
 --   a refreshable materialized view gives it a schedule. Between the two, the
 --   feed arrives with nothing running on your laptop.
 
-CREATE DATABASE IF NOT EXISTS citibike;
+CREATE DATABASE IF NOT EXISTS ny_citibike;
 
 -- --------------------------------------------------------------------------
 -- Landing tables
@@ -27,7 +27,7 @@ CREATE DATABASE IF NOT EXISTS citibike;
 -- in Postgres and gets here later by a completely different route — ClickPipes
 -- CDC, in module 05. Keeping the two apart is what makes the demo legible.
 
-CREATE TABLE IF NOT EXISTS citibike.gbfs_status
+CREATE TABLE IF NOT EXISTS ny_citibike.gbfs_status
 (
     polled_at            DateTime,
     station_id           String,
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS citibike.gbfs_status
 ENGINE = ReplacingMergeTree
 ORDER BY (polled_at, station_id);
 
-CREATE TABLE IF NOT EXISTS citibike.gbfs_stations
+CREATE TABLE IF NOT EXISTS ny_citibike.gbfs_stations
 (
     station_id String,
     name       String,
@@ -71,11 +71,11 @@ ORDER BY station_id;
 -- again and collapses at merge time. That is a different mechanism from the
 -- one Postgres uses in module 03, and worth comparing.
 
-DROP VIEW IF EXISTS citibike.gbfs_pull;
+DROP VIEW IF EXISTS ny_citibike.gbfs_pull;
 
-CREATE MATERIALIZED VIEW citibike.gbfs_pull
+CREATE MATERIALIZED VIEW ny_citibike.gbfs_pull
 REFRESH EVERY 1 MINUTE APPEND
-TO citibike.gbfs_status
+TO ny_citibike.gbfs_status
 AS
 WITH src AS (
     SELECT json
@@ -104,11 +104,11 @@ ARRAY JOIN JSONExtractArrayRaw(JSONExtractRaw(json, 'data'), 'stations') AS s;
 -- No APPEND here, deliberately. Stations are a dimension: the newest snapshot
 -- of the list is the truth, and accumulating a copy every hour would be waste.
 
-DROP VIEW IF EXISTS citibike.gbfs_stations_pull;
+DROP VIEW IF EXISTS ny_citibike.gbfs_stations_pull;
 
-CREATE MATERIALIZED VIEW citibike.gbfs_stations_pull
+CREATE MATERIALIZED VIEW ny_citibike.gbfs_stations_pull
 REFRESH EVERY 1 HOUR
-TO citibike.gbfs_stations
+TO ny_citibike.gbfs_stations
 AS
 WITH src AS (
     SELECT json
@@ -127,7 +127,7 @@ FROM src
 ARRAY JOIN JSONExtractArrayRaw(JSONExtractRaw(json, 'data'), 'stations') AS s;
 
 -- Do not wait an hour for the first station list.
-SYSTEM REFRESH VIEW citibike.gbfs_stations_pull;
+SYSTEM REFRESH VIEW ny_citibike.gbfs_stations_pull;
 
 -- --------------------------------------------------------------------------
 -- Did it work?
@@ -135,13 +135,13 @@ SYSTEM REFRESH VIEW citibike.gbfs_stations_pull;
 
 SELECT view, status, last_success_time, next_refresh_time, exception
 FROM system.view_refreshes
-WHERE database = 'citibike';
+WHERE database = 'ny_citibike';
 
 SELECT count() AS status_rows,
        uniqExact(polled_at)  AS snapshots,
        uniqExact(station_id) AS stations,
        min(polled_at) AS first,
        max(polled_at) AS last
-FROM citibike.gbfs_status;
+FROM ny_citibike.gbfs_status;
 
-SELECT count() AS stations FROM citibike.gbfs_stations;
+SELECT count() AS stations FROM ny_citibike.gbfs_stations;

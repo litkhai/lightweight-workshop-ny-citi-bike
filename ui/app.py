@@ -36,7 +36,7 @@ HERE = Path(__file__).parent
 PORT = int(os.environ.get("UI_PORT", "8080"))
 
 # Geometry lives here and never moves.
-LOCAL_SCHEMA = os.environ.get("LOCAL_SCHEMA", "citibike")
+LOCAL_SCHEMA = os.environ.get("LOCAL_SCHEMA", "ny_citibike")
 
 # Where module 05 imported the foreign tables. Empty until then; the page says
 # so plainly rather than reporting a failed pushdown.
@@ -551,27 +551,27 @@ def checks(cur, state):
 
     check("02", "Publication names two tables",
           lambda: (lambda v: (v[0] == 2, f"{v[0]} table(s) published"))(
-              scalar("SELECT count(*) FROM pg_publication_tables WHERE pubname='citibike_pub'")),
+              scalar("SELECT count(*) FROM pg_publication_tables WHERE pubname='ny_citibike_pub'")),
           "Run sql/01-schema.sql. ClickPipes needs this in module 05.")
 
     check("03", "pg_cron job is scheduled and active",
-          lambda: (lambda v: (bool(v[0]), v[1] or "no citibike-sync job"))(
-              scalar("""SELECT (SELECT active FROM cron.job WHERE jobname='citibike-sync'),
+          lambda: (lambda v: (bool(v[0]), v[1] or "no ny_citibike-sync job"))(
+              scalar("""SELECT (SELECT active FROM cron.job WHERE jobname='ny_citibike-sync'),
                                (SELECT jobname || ' · ' || schedule FROM cron.job
-                                 WHERE jobname='citibike-sync')""")),
+                                 WHERE jobname='ny_citibike-sync')""")),
           "Run sql/03-postgres-sync.sql.")
 
     check("03", "Its last run succeeded",
           lambda: (lambda v: (v[0] == 'succeeded', f"{v[0] or 'never run'}"
                               + (f" at {v[1]}" if v[1] else "")))(
               scalar("""SELECT status, to_char(start_time,'HH24:MI:SS') FROM cron.job_run_details
-                         WHERE jobname='citibike-sync' ORDER BY runid DESC LIMIT 1""")),
+                         WHERE jobname='ny_citibike-sync' ORDER BY runid DESC LIMIT 1""")),
           "Look at return_message in cron.job_run_details — usually the FDW credentials.")
 
     check("03", "ClickHouse landing tables are reachable",
-          lambda: (lambda v: (v[0] == 2, f"{v[0]} of 2 foreign tables in citibike_ingest"))(
+          lambda: (lambda v: (v[0] == 2, f"{v[0]} of 2 foreign tables in ny_citibike_ingest"))(
               scalar("""SELECT count(*) FROM information_schema.foreign_tables
-                         WHERE foreign_table_schema='citibike_ingest'""")),
+                         WHERE foreign_table_schema='ny_citibike_ingest'""")),
           "Run clickhouse/01-ingest-rmv.sql first, then sql/03-postgres-sync.sql.")
 
     check("03", "Data is arriving",
@@ -767,12 +767,12 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 cur.execute("""
                     SELECT coalesce((SELECT jobname || ' · ' || schedule FROM cron.job
-                                      WHERE jobname = 'citibike-sync'), 'no job'),
+                                      WHERE jobname = 'ny_citibike-sync'), 'no job'),
                            coalesce((SELECT status || ' at ' || to_char(start_time,'HH24:MI:SS')
-                                       FROM cron.job_run_details WHERE jobname = 'citibike-sync'
+                                       FROM cron.job_run_details WHERE jobname = 'ny_citibike-sync'
                                       ORDER BY runid DESC LIMIT 1), '-'),
                            (SELECT count(*) FROM cron.job_run_details
-                             WHERE jobname = 'citibike-sync' AND status <> 'succeeded')""")
+                             WHERE jobname = 'ny_citibike-sync' AND status <> 'succeeded')""")
                 pipeline["cron"], pipeline["cron_last"], pipeline["cron_failures"] = cur.fetchone()
             except Exception:                                      # noqa: BLE001
                 conn.rollback()
@@ -784,7 +784,7 @@ class Handler(BaseHTTPRequestHandler):
                 cur.execute("""
                     SELECT to_char(max(polled_at), 'HH24:MI:SS'),
                            extract(epoch FROM now() - max(polled_at))::int
-                      FROM citibike_ingest.gbfs_status""")
+                      FROM ny_citibike_ingest.gbfs_status""")
                 pipeline["landing_newest"], pipeline["landing_lag"] = cur.fetchone()
             except Exception:                                      # noqa: BLE001
                 conn.rollback()

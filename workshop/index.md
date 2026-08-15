@@ -23,18 +23,19 @@ the **execution plan**, not out of a stopwatch.
 Citi Bike GBFS            public JSON, no API key, ~2,500 stations, refreshed every 60s
       │  ClickHouse refreshable MV over url(), every minute
       ▼
-ClickHouse Cloud   citibike.gbfs_status          ← landing
-      │  pg_clickhouse foreign table + pg_cron, every minute
+ClickHouse Cloud          database ny_citibike
+      gbfs_status                                  ← landing
+      │  ny_citibike_ingest.gbfs_status  +  pg_cron, every minute
       ▼
-ClickHouse Managed Postgres
-      citibike.stations        PostGIS points  · 2,500 rows  · barely changes
-      citibike.station_status  snapshots       · +3.6M rows/day · only ever counted
+ClickHouse Managed Postgres   schema ny_citibike
+      stations              PostGIS points  · 2,500 rows  · barely changes
+      station_status        snapshots       · +3.6M rows/day · only ever counted
       │  ClickPipes (Postgres CDC)
       ▼
-ClickHouse Cloud
-      mirror of both tables
+ClickHouse Cloud          database ny_citibike
+      stations · station_status                    ← mirrored, name for name
       ▲
-      │  pg_clickhouse — foreign tables, back in the Postgres session
+      │  ny_citibike_ch.*  — foreign tables, back in the Postgres session
       │
 Your SQL: geometry stays local, aggregates run remotely
       │

@@ -34,7 +34,7 @@ You want:
 | Check | Required | Why |
 |---|---|---|
 | `wal_level` | `logical` | Logical decoding is how CDC reads changes |
-| publication | `citibike_pub`, 2 tables | Created by `sql/01-schema.sql` |
+| publication | `ny_citibike_pub`, 2 tables | Created by `sql/01-schema.sql` |
 | replica identity | `default (primary key)` on both | Without it the pipe refuses the table |
 
 All three are set up by module 02 on a stock Managed Postgres service. If
@@ -76,8 +76,8 @@ which of the three preconditions is missing.
 
 Select **both**:
 
-- `citibike.stations`
-- `citibike.station_status`
+- `ny_citibike.stations`
+- `ny_citibike.station_status`
 
 !!! danger "Replicate both, or the pushdown will not work"
     It is tempting to replicate only the big fact table and keep the small
@@ -94,14 +94,31 @@ Leave the sync mode at the default (initial snapshot, then continuous CDC).
 
 ## Step 4 — Destination
 
-Target database `default` and keep the table names as they are: `stations` and
-`station_status`. Module 06's `IMPORT FOREIGN SCHEMA` expects those names.
+Target database **`ny_citibike`** — the one module 03 created, not `default` —
+and keep the table names as they are: `stations` and `station_status`. Module
+06's `IMPORT FOREIGN SCHEMA` expects exactly that.
 
-!!! note "`default`, not `citibike`"
-    Module 03 created a `citibike` database on this same ClickHouse service for
-    the landing tables. The CDC mirror is a different thing and goes in
-    `default`. Keeping them apart is what lets you tell, later, whether a row
-    arrived by `url()` or by replication.
+After this step the ClickHouse database holds four tables, and the pairing is
+the point:
+
+```text
+ny_citibike (ClickHouse)          ny_citibike (Postgres)
+  gbfs_status     ← url(), 03
+  gbfs_stations   ← url(), 03
+  stations        ← CDC, 05  ══════  stations       PostGIS geometry
+  station_status  ← CDC, 05  ══════  station_status the fact table
+```
+
+Same database name, same table names, on both engines. That is deliberate: in
+module 06 the only difference between a query that runs locally and one that
+runs on ClickHouse becomes the **schema prefix**, not the object name — so when
+the verdict changes you know it was the routing that changed and nothing else.
+
+!!! note "Two arrivals, one database"
+    The `gbfs_*` tables got here by `url()` and are an ingestion detail. The two
+    that match Postgres got here by replication and are what the workshop
+    measures. They coexist without colliding because the names differ, and
+    keeping them in one database is what makes the naming line up.
 
 If the connector offers an engine choice, `ReplacingMergeTree` keyed on the
 primary key is the sensible default for CDC — it is how updates and deletes
@@ -136,15 +153,18 @@ The **replication** section, empty until now, fills in:
 In the console, open your ClickHouse service's SQL console:
 
 ```sql
-SELECT count(*) FROM default.station_status;
-SELECT count(*) FROM default.stations;
-SELECT max(polled_at) FROM default.station_status;
+SHOW TABLES FROM ny_citibike;          -- expect four: 2 landing, 2 replicated
+
+SELECT count(*)       FROM ny_citibike.station_status;
+SELECT count(*)       FROM ny_citibike.stations;
+SELECT max(polled_at) FROM ny_citibike.station_status;
 ```
 
-Compare against Postgres:
+Now compare against Postgres — and notice that you are running the *same
+statement text*, because the schema and the database have the same name:
 
 ```bash
-./scripts/psql.sh -c "SELECT count(*) FROM citibike.station_status"
+./scripts/psql.sh -c "SELECT count(*) FROM ny_citibike.station_status"
 ```
 
 They will not match exactly, and that is correct — the database is still

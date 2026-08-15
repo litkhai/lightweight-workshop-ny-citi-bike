@@ -12,22 +12,35 @@ then prove — from the plan, not the clock — that the counting runs remotely.
 ```bash
 ./scripts/psql.sh \
   -v ch_host="$(grep '^CH_HOST=' .env | cut -d= -f2)" \
-  -v ch_db=default -v ch_user=default \
+  -v ch_db=ny_citibike -v ch_user=default \
   -v ch_pass="$(grep '^CH_PASSWORD=' .env | cut -d= -f2-)" \
   -f /sql/40-fdw-clickhouse.sql
 ```
 
-That creates the extension, a foreign server, a user mapping, and imports the
-two ClickHouse tables into a **separate schema called `citibike_ch`**.
+Note `ch_db=ny_citibike` — the ClickHouse database, named to match the Postgres
+schema since module 02. The script creates the extension, a foreign server, a
+user mapping, and imports the two ClickHouse tables into a **local schema called
+`ny_citibike_ch`**.
 
-Keeping the namespaces apart is what makes the rest legible:
+This is where the matched naming earns its keep:
 
 ```text
-citibike.station_status      local Postgres
-citibike_ch.station_status   the same data, on ClickHouse
+ny_citibike.station_status      the real table, in Postgres
+ny_citibike_ch.station_status   the same rows, answered by ClickHouse
 ```
 
-The same query text against either one tells you where the work went.
+Same table name. Same columns. Same row count. **One prefix apart.** So when you
+run the identical query text against each and the verdict changes, there is
+nothing else it could have been — you did not touch the query, only which engine
+was asked. That is the whole reason this workshop insists on one name per
+namespace instead of `citibike` here and `default` there.
+
+!!! note "Why `_ch` and not just `ny_citibike`"
+    The foreign tables live in Postgres too, and the real schema already owns
+    the bare name. `ny_citibike_ch` and `ny_citibike_ingest` from module 03 are
+    both local Postgres schemas holding foreign tables — the suffix says "this is
+    a window onto the other engine", which is the one distinction you actually
+    want visible in a query.
 
 !!! warning "The FDW dials outward from the Postgres server"
     Not from your laptop. A ClickHouse running in a container on your machine
@@ -43,8 +56,8 @@ The script ends with two `EXPLAIN`s. Here is what to read.
 ```sql
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT st.name, count(*), round(avg(ss.num_bikes_available), 1)
-FROM citibike_ch.station_status ss
-JOIN citibike_ch.stations st ON st.station_key = ss.station_key
+FROM ny_citibike_ch.station_status ss
+JOIN ny_citibike_ch.stations st ON st.station_key = ss.station_key
 GROUP BY st.name ORDER BY count(*) DESC LIMIT 10;
 ```
 
@@ -54,11 +67,11 @@ rows.
 
 ### The counter-example
 
-Same query, one word different — `citibike.stations` instead of `citibike_ch.stations`:
+Same query, one word different — `ny_citibike.stations` instead of `ny_citibike_ch.stations`:
 
 ```sql
-FROM citibike_ch.station_status ss
-JOIN citibike.stations st ON st.station_key = ss.station_key
+FROM ny_citibike_ch.station_status ss
+JOIN ny_citibike.stations st ON st.station_key = ss.station_key
 ```
 
 Now the `Remote SQL` selects **columns only**, and there is a `Hash Join` and a
@@ -74,11 +87,11 @@ joined and counted in Postgres.
 
 ```bash
 ./scripts/explain-pushdown.sh \
-  "SELECT count(*) FROM citibike_ch.station_status"
+  "SELECT count(*) FROM ny_citibike_ch.station_status"
 
 ./scripts/explain-pushdown.sh \
-  "SELECT st.name, count(*) FROM citibike_ch.station_status ss
-   JOIN citibike.stations st ON st.station_key = ss.station_key GROUP BY st.name"
+  "SELECT st.name, count(*) FROM ny_citibike_ch.station_status ss
+   JOIN ny_citibike.stations st ON st.station_key = ss.station_key GROUP BY st.name"
 ```
 
 The script walks the plan and prints one of four verdicts:
@@ -98,8 +111,8 @@ worse than saying nothing.
 ## Run the same file against both sides
 
 ```bash
-./scripts/psql.sh -v s=citibike    -f /sql/20-aggregate-pushdown.sql # local
-./scripts/psql.sh -v s=citibike_ch -f /sql/20-aggregate-pushdown.sql # ClickHouse
+./scripts/psql.sh -v s=ny_citibike    -f /sql/20-aggregate-pushdown.sql # local
+./scripts/psql.sh -v s=ny_citibike_ch -f /sql/20-aggregate-pushdown.sql # ClickHouse
 ```
 
 Identical SQL, one variable different. Compare the `Time:` lines that `\timing`
@@ -118,7 +131,7 @@ To get departures and arrivals you have to diff consecutive snapshots per
 station — a window function partitioned by station over the whole fact table:
 
 ```bash
-./scripts/psql.sh -v s=citibike -f /sql/30-snapshot-to-events.sql
+./scripts/psql.sh -v s=ny_citibike -f /sql/30-snapshot-to-events.sql
 ```
 
 The file ends with an `EXPLAIN (ANALYZE, BUFFERS)`. Read it before assuming
@@ -152,7 +165,7 @@ Try it. Add `ORDER BY num_bikes_available` to the window and re-run the
 `EXPLAIN`; watch `Sort Method` appear.
 
 ```bash
-./scripts/psql.sh -v s=citibike_ch -f /sql/30-snapshot-to-events.sql
+./scripts/psql.sh -v s=ny_citibike_ch -f /sql/30-snapshot-to-events.sql
 ```
 
 !!! note "Measured, and at what size"
@@ -174,7 +187,7 @@ Try it. Add `ORDER BY num_bikes_available` to the window and re-run the
 Add this to `.env`:
 
 ```bash
-FOREIGN_SCHEMA=citibike_ch
+FOREIGN_SCHEMA=ny_citibike_ch
 ```
 
 ## Next

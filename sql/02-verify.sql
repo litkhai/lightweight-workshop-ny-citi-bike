@@ -21,7 +21,7 @@ SELECT count(*)                                    AS stations,
        round(min(lat)::numeric, 3) || ' .. ' || round(max(lat)::numeric, 3) AS lat_range,
        round(min(lon)::numeric, 3) || ' .. ' || round(max(lon)::numeric, 3) AS lon_range,
        sum(capacity)                               AS total_docks
-FROM citibike.stations;
+FROM ny_citibike.stations;
 
 \echo ''
 \echo '== status (the fact table) =='
@@ -31,8 +31,8 @@ SELECT count(*)                          AS rows,
        to_char(min(polled_at), 'YYYY-MM-DD HH24:MI:SS') AS first_poll,
        to_char(max(polled_at), 'YYYY-MM-DD HH24:MI:SS') AS last_poll,
        extract(epoch FROM now() - max(polled_at))::int  AS seconds_behind,
-       pg_size_pretty(pg_total_relation_size('citibike.station_status')) AS size
-FROM citibike.station_status;
+       pg_size_pretty(pg_total_relation_size('ny_citibike.station_status')) AS size
+FROM ny_citibike.station_status;
 
 \echo ''
 \echo '== is the feed still moving? (last 10 polls) =='
@@ -40,7 +40,7 @@ SELECT to_char(polled_at, 'HH24:MI:SS') AS poll,
        count(*)                         AS stations,
        sum(num_bikes_available)         AS bikes_out_there,
        sum(num_docks_available)         AS free_docks
-FROM citibike.station_status
+FROM ny_citibike.station_status
 GROUP BY polled_at
 ORDER BY polled_at DESC
 LIMIT 10;

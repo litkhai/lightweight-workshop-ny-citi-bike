@@ -28,7 +28,7 @@ FROM pg_roles WHERE rolname = current_user;
 
 CREATE EXTENSION IF NOT EXISTS plperlu;
 
-CREATE OR REPLACE FUNCTION citibike_perl_tls_probe()
+CREATE OR REPLACE FUNCTION ny_citibike_perl_tls_probe()
 RETURNS TABLE (item text, value text)
 LANGUAGE plperlu
 AS $perl$
@@ -53,7 +53,7 @@ AS $perl$
     return undef;
 $perl$;
 
-SELECT * FROM citibike_perl_tls_probe();
+SELECT * FROM ny_citibike_perl_tls_probe();
 
 \echo ''
 \echo '-- Measured on ClickHouse Managed Postgres (PostgreSQL 18.4) on 2026-08-15:'
@@ -66,4 +66,4 @@ SELECT * FROM citibike_perl_tls_probe();
 \echo '-- has no TLS, so the blocker is the image, not the permission — which'
 \echo '-- means a future platform update could flip this without warning.'
 
-DROP FUNCTION citibike_perl_tls_probe();
+DROP FUNCTION ny_citibike_perl_tls_probe();

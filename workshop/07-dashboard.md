@@ -47,7 +47,7 @@ exact text that went to ClickHouse.
     The side switch only appears once `FOREIGN_SCHEMA` is set and foreign
     tables exist. Before that the page says so plainly instead of showing a
     disabled button, because "not configured yet" and "broken" should not look
-    the same. Set `FOREIGN_SCHEMA=citibike_ch` in `.env` and
+    the same. Set `FOREIGN_SCHEMA=ny_citibike_ch` in `.env` and
     `docker compose up -d ui` again.
 
 ## The Lab — where you stop reading and start asking
@@ -100,7 +100,7 @@ with the file to re-run:
 ```text
 ✓ 02  PostGIS is installed                    postgis 3.6.4
 ✓ 02  Both tables exist                       2 of 2 found
-✗ 03  pg_cron job is scheduled and active     no citibike-sync job
+✗ 03  pg_cron job is scheduled and active     no ny_citibike-sync job
       → Run sql/03-postgres-sync.sql.
 ✓ 03  Data is arriving                        newest snapshot 76s old
 ✗ 05  A replication slot is active            no slot

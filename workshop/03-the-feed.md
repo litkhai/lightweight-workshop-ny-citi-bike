@@ -70,12 +70,23 @@ Open your ClickHouse service's SQL console and run
 [`clickhouse/01-ingest-rmv.sql`](https://github.com/litkhai/lightweight-workshop-ny-citi-bike/blob/main/clickhouse/01-ingest-rmv.sql).
 These are ClickHouse statements — they do not go through `psql`.
 
+Its first line is the other half of module 02's naming rule:
+
+```sql
+CREATE DATABASE IF NOT EXISTS ny_citibike;
+```
+
+Same name as the Postgres schema, deliberately. Module 05 will replicate the two
+Postgres tables into **this same database**, so by the end it holds four tables:
+the two landing tables you are about to create, and two that mirror Postgres
+name for name.
+
 The heart of it:
 
 ```sql
-CREATE MATERIALIZED VIEW citibike.gbfs_pull
+CREATE MATERIALIZED VIEW ny_citibike.gbfs_pull
 REFRESH EVERY 1 MINUTE APPEND
-TO citibike.gbfs_status
+TO ny_citibike.gbfs_status
 AS
 WITH src AS (
     SELECT json FROM url('https://gbfs.lyft.com/…/station_status.json',
@@ -106,9 +117,9 @@ rows.
 The station list uses the other form deliberately:
 
 ```sql
-CREATE MATERIALIZED VIEW citibike.gbfs_stations_pull
+CREATE MATERIALIZED VIEW ny_citibike.gbfs_stations_pull
 REFRESH EVERY 1 HOUR              -- no APPEND: replace
-TO citibike.gbfs_stations
+TO ny_citibike.gbfs_stations
 ```
 
 Stations are a dimension. The newest list is the truth; keeping an hourly copy
@@ -118,7 +129,7 @@ of it forever would be waste.
 
 ```sql
 SELECT view, status, last_success_time, next_refresh_time, exception
-FROM system.view_refreshes WHERE database = 'citibike';
+FROM system.view_refreshes WHERE database = 'ny_citibike';
 ```
 
 `exception` is where a failed fetch shows up. A refreshable MV that cannot
@@ -140,16 +151,31 @@ merge time. No comparison, no bookkeeping — the storage engine absorbs it.
   -f /sql/03-postgres-sync.sql
 ```
 
-Two things happen. `pg_clickhouse` imports the landing tables as foreign
-tables, and `pg_cron` schedules a procedure that copies new snapshots forward:
+Two things happen. `pg_clickhouse` imports the landing tables as foreign tables
+into **`ny_citibike_ingest`**, and `pg_cron` schedules a procedure that copies
+new snapshots forward.
+
+The suffix is the point. ClickHouse's database and the Postgres schema are both
+`ny_citibike`, so the foreign tables cannot also be called that locally — the
+real schema already owns the name. `_ingest` marks them for what they are: a
+window onto the other engine, not tables of your own.
+
+```sql
+IMPORT FOREIGN SCHEMA "ny_citibike"          -- the ClickHouse database
+    LIMIT TO (gbfs_status, gbfs_stations)
+    FROM SERVER ny_citibike_ingest_svr
+    INTO ny_citibike_ingest;                 -- a local Postgres schema
+```
+
+Then the copy forward:
 
 ```sql
 SELECT coalesce(max(polled_at), '1970-01-01') INTO hwm
-  FROM citibike.station_status;
+  FROM ny_citibike.station_status;
 
-INSERT INTO citibike.station_status (…)
-SELECT … FROM citibike_ingest.gbfs_status g
-JOIN citibike.stations st ON st.station_id = g.station_id
+INSERT INTO ny_citibike.station_status (…)
+SELECT … FROM ny_citibike_ingest.gbfs_status g
+JOIN ny_citibike.stations st ON st.station_id = g.station_id
 WHERE g.polled_at > hwm;
 ```
 
@@ -158,8 +184,8 @@ the scheduler was busy, the FDW timed out — the next one closes the gap. A
 "last run" cursor leaves a hole that nothing ever comes back for.
 
 ```sql
-SELECT cron.schedule('citibike-sync', '* * * * *',
-                     'CALL citibike.sync_from_clickhouse()');
+SELECT cron.schedule('ny_citibike-sync', '* * * * *',
+                     'CALL ny_citibike.sync_from_clickhouse()');
 ```
 
 ## The shape you just built
@@ -168,20 +194,24 @@ SELECT cron.schedule('citibike-sync', '* * * * *',
 Citi Bike GBFS
      │  https
      ▼
-ClickHouse Cloud          refreshable MV, every minute
-     citibike.gbfs_status         ← landing
+ClickHouse Cloud   database ny_citibike     refreshable MV, every minute
+     gbfs_status                            ← landing
      │
-     │  pg_clickhouse foreign table
+     │  ny_citibike_ingest.gbfs_status      ← foreign table, local name
      ▼
-Managed Postgres          pg_cron, every minute
-     citibike.stations            ← PostGIS geometry
-     citibike.station_status      ← the fact table
+Managed Postgres   schema ny_citibike       pg_cron, every minute
+     stations                               ← PostGIS geometry
+     station_status                         ← the fact table
      │
-     │  ClickPipes CDC            ← module 05
+     │  ClickPipes CDC                      ← module 05
      ▼
-ClickHouse Cloud
-     citibike.station_status      ← what the pushdown reads
+ClickHouse Cloud   database ny_citibike
+     station_status                         ← what the pushdown reads (06)
 ```
+
+Read the two `ny_citibike` labels as the same namespace expressed twice, once
+per engine. The only names carrying a suffix are the local foreign-table
+schemas, and that is exactly where a suffix is informative.
 
 **Two schedulers, both server-side, nothing on your laptop.**
 

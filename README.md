@@ -28,18 +28,19 @@ them locally. So every query here ends with a verdict read out of the plan.
 Citi Bike GBFS            public JSON · no API key · ~2,500 stations · refreshed every 60s
       │  ClickHouse refreshable MV over url(), every minute
       ▼
-ClickHouse Cloud   citibike.gbfs_status          ← landing
-      │  pg_clickhouse foreign table + pg_cron, every minute
+ClickHouse Cloud          database ny_citibike
+      gbfs_status                                  ← landing
+      │  ny_citibike_ingest.gbfs_status  +  pg_cron, every minute
       ▼
-ClickHouse Managed Postgres
-      citibike.stations        PostGIS points  · 2,500 rows      · barely changes
-      citibike.station_status  snapshots       · +3.6M rows/day  · only ever counted
+ClickHouse Managed Postgres   schema ny_citibike
+      stations              PostGIS points  · 2,500 rows      · barely changes
+      station_status        snapshots       · +3.6M rows/day  · only ever counted
       │  ClickPipes (Postgres CDC)
       ▼
-ClickHouse Cloud
-      mirror of both tables
+ClickHouse Cloud          database ny_citibike
+      stations · station_status                    ← mirrored, name for name
       ▲
-      │  pg_clickhouse — foreign tables, back in the Postgres session
+      │  ny_citibike_ch.*  — foreign tables, back in the Postgres session
       │
 Your SQL: geometry stays local, aggregates run remotely
       │
@@ -47,8 +48,22 @@ Your SQL: geometry stays local, aggregates run remotely
 Dashboard (Docker) — badges every query with the engine that answered
 ```
 
-The join key is a `bigint`, so no geometry ever has to cross. That is the
-whole trick.
+Two things make that work.
+
+**The join key is a `bigint`**, so no geometry ever has to cross.
+
+**One namespace name on both engines** — the Postgres schema and the ClickHouse
+database are both `ny_citibike`, and the mirrored tables keep their names. So
+`ny_citibike.station_status` means the same thing on either side, and the only
+difference between a local query and a pushed-down one is a schema prefix:
+
+```text
+ny_citibike.station_status      the real table, in Postgres
+ny_citibike_ch.station_status   the same rows, answered by ClickHouse
+```
+
+When the verdict changes, the query text did not. That is what makes the
+comparison evidence rather than anecdote.
 
 ## Requirements
 

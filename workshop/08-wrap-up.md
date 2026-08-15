@@ -43,14 +43,14 @@ the dashboard and nothing else.
 On Postgres:
 
 ```bash
-./scripts/psql.sh -c "SELECT cron.unschedule('citibike-sync')"
+./scripts/psql.sh -c "SELECT cron.unschedule('ny_citibike-sync')"
 ```
 
 On ClickHouse — in its SQL console:
 
 ```sql
-DROP VIEW IF EXISTS citibike.gbfs_pull;
-DROP VIEW IF EXISTS citibike.gbfs_stations_pull;
+DROP VIEW IF EXISTS ny_citibike.gbfs_pull;
+DROP VIEW IF EXISTS ny_citibike.gbfs_stations_pull;
 ```
 
 Then confirm both are gone:
@@ -60,7 +60,7 @@ Then confirm both are gone:
 ```
 
 ```sql
-SELECT view, status FROM system.view_refreshes WHERE database = 'citibike';
+SELECT view, status FROM system.view_refreshes WHERE database = 'ny_citibike';
 ```
 
 Finally, the dashboard:

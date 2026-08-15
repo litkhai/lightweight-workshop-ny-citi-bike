@@ -44,7 +44,13 @@ You want the **HTTPS** endpoint, not the native one:
 | Port | `8443` | `CH_PORT` |
 | User | `default` | `CH_USER` |
 | Password | shown once at creation | `CH_PASSWORD` |
-| Database | `default` | `CH_DATABASE` |
+| Database | `ny_citibike` — **not** the `default` shown here | `CH_DATABASE` |
+
+!!! note "Why `ny_citibike` when the console says `default`"
+    The Connect screen shows the service's default database. This workshop puts
+    everything in a database called **`ny_citibike`**, created in module 03, to
+    match the Postgres schema name exactly. Writing it into `.env` now means you
+    do not have to come back for it.
 
 !!! warning "The password is shown once"
     Copy it into `.env` now. If you lose it you can reset it from the service's

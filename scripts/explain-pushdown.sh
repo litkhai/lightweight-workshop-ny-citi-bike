@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Did that query run on ClickHouse, or did the rows come back to be counted here?
 #
-#   ./scripts/explain-pushdown.sh "SELECT count(*) FROM citibike_ch.station_status"
+#   ./scripts/explain-pushdown.sh "SELECT count(*) FROM ny_citibike_ch.station_status"
 #   ./scripts/explain-pushdown.sh -f /sql/20-aggregate-pushdown.sql
 #
 # Reading the plan is the only honest answer. A fast query proves nothing:
@@ -51,8 +51,8 @@ else
     echo "Postgres — the foreign scan selects columns only. Every row crossed"
     echo "the network to be counted here."
     echo
-    echo "The usual cause is a local table in the join. Both citibike.stations and"
-    echo "citibike.station_status have to be replicated for the join to stay remote."
+    echo "The usual cause is a local table in the join. Both ny_citibike.stations and"
+    echo "ny_citibike.station_status have to be replicated for the join to stay remote."
     echo
     printf '%s\n' "$REMOTE" | mask
 fi

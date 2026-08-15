@@ -66,7 +66,9 @@ ask        "Host        (…aws.clickhouse.cloud)"    ""          CH_HOST
 ask        "Port"                                   "8443"      CH_PORT
 ask        "User"                                   "default"   CH_USER
 ask_secret "Password"                                           CH_PASSWORD
-ask        "Database"                               "default"   CH_DATABASE
+dim  "     Database is ny_citibike, matching the Postgres schema — module 03"
+dim  "     creates it. Not the 'default' the Connect screen shows."
+ask        "Database"                          "ny_citibike"    CH_DATABASE
 echo
 
 # --------------------------------------------------------------------------
@@ -106,7 +108,7 @@ CH_DATABASE=$CH_DATABASE
 # url() calls in clickhouse/01-ingest-rmv.sql.
 
 # Dashboard. FOREIGN_SCHEMA stays empty until module 06 imports it.
-LOCAL_SCHEMA=citibike
+LOCAL_SCHEMA=ny_citibike
 FOREIGN_SCHEMA=
 UI_PORT=8080
 EOF

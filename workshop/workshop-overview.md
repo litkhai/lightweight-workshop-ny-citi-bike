@@ -26,6 +26,23 @@ ClickHouse, `pg_clickhouse` bringing them back into the Postgres session as
 foreign tables, and the query planner deciding what runs where. The join key is
 a `bigint`, so no geometry ever has to cross.
 
+## The names, up front
+
+Everything lives under one namespace name, spelled the same on both engines:
+
+| | Where | What |
+|---|---|---|
+| `ny_citibike` | Postgres **schema** | the real tables. Geometry lives here |
+| `ny_citibike` | ClickHouse **database** | landing tables, plus the CDC mirror |
+| `ny_citibike_ingest` | Postgres schema | foreign tables over ClickHouse's landing tables |
+| `ny_citibike_ch` | Postgres schema | foreign tables over ClickHouse's mirror |
+
+The first two share a name deliberately. `ny_citibike.station_status` refers to
+the same data whichever engine you ask, so the only difference between a local
+query and a pushed-down one is a prefix — and when the verdict changes you know
+the query text did not. The two suffixed schemas are both local, and the suffix
+is there because the real schema already owns the bare name.
+
 ## Modules
 
 | | Module | Time | Needs |

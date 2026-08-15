@@ -10,7 +10,7 @@ bundle). The image is `python:3.12-slim` with `psycopg[binary]`.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `LOCAL_SCHEMA` | `citibike` | Where the geometry lives. Maps always read this |
+| `LOCAL_SCHEMA` | `ny_citibike` | Where the geometry lives. Maps always read this |
 | `FOREIGN_SCHEMA` | *(empty)* | Where `sql/40-fdw-clickhouse.sql` imported the foreign tables. Set it and Statistics gains a side switch |
 | `UI_PORT` | `8080` | Listen port |
 | `STATEMENT_TIMEOUT_MS` | `120000` | Server-side ceiling on any one query |
@@ -65,7 +65,7 @@ that, the first failure aborts the transaction and every later check reports
 "current transaction is aborted" instead of its own result — exactly backwards,
 since the failing checks are the ones a reader opened the tab to see. Half of
 them touch objects that legitimately do not exist yet (`cron.job` before module
-03, `citibike_ingest` before the FDW), so failure is the normal case here.
+03, `ny_citibike_ingest` before the FDW), so failure is the normal case here.
 
 ## The verdict
 

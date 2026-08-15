@@ -1,12 +1,13 @@
 -- Point Postgres at ClickHouse with pg_clickhouse.
 --
--- Run this AFTER ClickPipes has replicated citibike.stations and citibike.station_status
--- into ClickHouse Cloud. It does not move any data; it teaches Postgres how to
--- reach tables that already exist on the other side.
+-- Run this AFTER ClickPipes has replicated ny_citibike.stations and
+-- ny_citibike.station_status into the ny_citibike database on ClickHouse Cloud.
+-- It does not move any data; it teaches Postgres how to reach tables that
+-- already exist on the other side.
 --
 --   ./scripts/psql.sh \
 --       -v ch_host=xxx.clickhouse.cloud \
---       -v ch_db=default \
+--       -v ch_db=ny_citibike \
 --       -v ch_user=default \
 --       -v ch_pass='...' \
 --       -f /sql/40-fdw-clickhouse.sql
@@ -34,32 +35,39 @@ CREATE EXTENSION IF NOT EXISTS pg_clickhouse;
 -- Server and credentials
 -- --------------------------------------------------------------------------
 
-DROP SERVER IF EXISTS citibike_ch_svr CASCADE;
+DROP SERVER IF EXISTS ny_citibike_ch_svr CASCADE;
 
-CREATE SERVER citibike_ch_svr
+CREATE SERVER ny_citibike_ch_svr
     FOREIGN DATA WRAPPER clickhouse_fdw
     OPTIONS (host :'ch_host', port '8443', dbname :'ch_db', secure 'true');
 
 CREATE USER MAPPING FOR CURRENT_USER
-    SERVER citibike_ch_svr
+    SERVER ny_citibike_ch_svr
     OPTIONS (user :'ch_user', password :'ch_pass');
 
 -- --------------------------------------------------------------------------
 -- Import
 -- --------------------------------------------------------------------------
 --
--- A separate schema, not `citibike`. Keeping the two namespaces apart is what
--- makes the demo legible: `citibike.station_status` is local, `citibike_ch.station_status`
--- is remote, and the same query text against either one tells you where the
--- work went.
+-- The ClickHouse database is `ny_citibike` and so is the Postgres schema — the
+-- names match on purpose. But the *foreign tables* cannot also be called
+-- `ny_citibike` locally, because the real schema already owns that name. So they
+-- land in `ny_citibike_ch`, and the arrangement reads:
+--
+--   ny_citibike.station_status      local Postgres, the real table
+--   ny_citibike_ch.station_status   the same rows, answered by ClickHouse
+--
+-- Identical table name, identical column list, one prefix apart. That is what
+-- makes the comparison in module 06 mean something: when the verdict changes,
+-- the only thing that changed was where the work went.
 
-DROP SCHEMA IF EXISTS citibike_ch CASCADE;
-CREATE SCHEMA citibike_ch;
+DROP SCHEMA IF EXISTS ny_citibike_ch CASCADE;
+CREATE SCHEMA ny_citibike_ch;
 
 IMPORT FOREIGN SCHEMA :"ch_db"
     LIMIT TO (stations, station_status)
-    FROM SERVER citibike_ch_svr
-    INTO citibike_ch;
+    FROM SERVER ny_citibike_ch_svr
+    INTO ny_citibike_ch;
 
 -- --------------------------------------------------------------------------
 -- Did it work?
@@ -73,9 +81,9 @@ ORDER BY 1, 2;
 
 \echo ''
 \echo '== row counts on each side =='
-SELECT 'postgres' AS side, count(*) FROM citibike.station_status
+SELECT 'postgres' AS side, count(*) FROM ny_citibike.station_status
 UNION ALL
-SELECT 'clickhouse',       count(*) FROM citibike_ch.station_status;
+SELECT 'clickhouse',       count(*) FROM ny_citibike_ch.station_status;
 
 \echo ''
 \echo '== the moment of truth: does the aggregate go remote? =='
@@ -84,8 +92,8 @@ SELECT 'clickhouse',       count(*) FROM citibike_ch.station_status;
 -- counted here — which is a failure, however fast it felt.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT st.name, count(*), round(avg(ss.num_bikes_available), 1)
-FROM citibike_ch.station_status ss
-JOIN citibike_ch.stations st ON st.station_key = ss.station_key
+FROM ny_citibike_ch.station_status ss
+JOIN ny_citibike_ch.stations st ON st.station_key = ss.station_key
 GROUP BY st.name
 ORDER BY count(*) DESC
 LIMIT 10;
@@ -97,8 +105,8 @@ LIMIT 10;
 -- the single most common way a pushdown quietly stops working.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT st.name, count(*), round(avg(ss.num_bikes_available), 1)
-FROM citibike_ch.station_status ss
-JOIN citibike.stations st ON st.station_key = ss.station_key
+FROM ny_citibike_ch.station_status ss
+JOIN ny_citibike.stations st ON st.station_key = ss.station_key
 GROUP BY st.name
 ORDER BY count(*) DESC
 LIMIT 10;

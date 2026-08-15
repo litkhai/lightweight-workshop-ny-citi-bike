@@ -22,7 +22,7 @@ services:
       PGSSLMODE:  ${PGSSLMODE:-require}
 
       # Geometry lives here and never moves.
-      LOCAL_SCHEMA: ${LOCAL_SCHEMA:-citibike}
+      LOCAL_SCHEMA: ${LOCAL_SCHEMA:-ny_citibike}
 
       # Where sql/40-fdw-clickhouse.sql imported the foreign tables. Empty
       # until module 06. Left empty the dashboard says plainly that there is

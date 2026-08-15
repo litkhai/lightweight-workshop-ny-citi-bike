@@ -7,6 +7,40 @@
 Create the two tables the whole workshop rests on, and understand the four
 decisions baked into them.
 
+## One name on both engines
+
+Before the first statement, the naming rule, because everything downstream
+depends on it:
+
+```text
+Postgres     schema    ny_citibike
+ClickHouse   database  ny_citibike
+```
+
+**The same name in both places.** Postgres calls it a schema and ClickHouse
+calls it a database, but they are the same idea — a namespace holding this
+workshop's tables — and giving them one name means a table has the same
+qualified name wherever it lives:
+
+```text
+ny_citibike.station_status   in Postgres   … and in ClickHouse
+```
+
+That is not tidiness. In module 06 you will run one query text against both
+engines, and the *only* thing that differs will be a schema prefix. If the names
+drifted — `citibike` here, `default` there — you could never be sure whether a
+changed result came from changed routing or from having typed a different table.
+
+Two derived names appear later. Both are **local** Postgres schemas holding
+foreign tables, and both take a suffix because the real schema already owns the
+bare name:
+
+| Name | Created in | What it is |
+|---|---|---|
+| `ny_citibike` | module 02 | the real Postgres schema. Geometry lives here |
+| `ny_citibike_ingest` | module 03 | foreign tables over ClickHouse's landing tables |
+| `ny_citibike_ch` | module 06 | foreign tables over ClickHouse's CDC mirror |
+
 ## Create the schema
 
 ```bash
@@ -17,8 +51,8 @@ decisions baked into them.
 path in this workshop starts `/sql/`. Nothing was installed on your machine.
 
 ```sql
-citibike.stations        station_key bigint PK, …, geom geometry(Point,4326)
-citibike.station_status  status_id bigint PK, station_key bigint, polled_at, counts…
+ny_citibike.stations        station_key bigint PK, …, geom geometry(Point,4326)
+ny_citibike.station_status  status_id bigint PK, station_key bigint, polled_at, counts…
 ```
 
 Two tables, and the split between them is the entire workshop:
@@ -71,8 +105,8 @@ absent.
 ### A named publication, not `FOR ALL TABLES`
 
 ```sql
-CREATE PUBLICATION citibike_pub
-  FOR TABLE citibike.stations, citibike.station_status;
+CREATE PUBLICATION ny_citibike_pub
+  FOR TABLE ny_citibike.stations, ny_citibike.station_status;
 ```
 
 A `FOR ALL TABLES` publication sweeps up every scratch table anyone creates
@@ -83,7 +117,7 @@ downstream.
 
 ```sql
 CREATE INDEX status_station_time_ix
-    ON citibike.station_status (station_key, polled_at);
+    ON ny_citibike.station_status (station_key, polled_at);
 ```
 
 Remember this one. In [module 06](06-pushdown.md) it turns out to cover the

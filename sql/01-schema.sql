@@ -2,21 +2,21 @@
 --
 -- Two tables, and the split between them is the whole point:
 --
---   citibike.stations        geometry. ~2,500 rows, changes rarely. Stays in Postgres.
---   citibike.station_status  one row per station per poll. Grows forever. Only counted.
+--   ny_citibike.stations        geometry. ~2,500 rows, changes rarely. Stays in Postgres.
+--   ny_citibike.station_status  one row per station per poll. Grows forever. Only counted.
 --
 -- They join on station_key, a bigint. No geometry ever has to reach the side
 -- that does the counting, which is why the counting can move to ClickHouse.
 
 CREATE EXTENSION IF NOT EXISTS postgis;
 
-CREATE SCHEMA IF NOT EXISTS citibike;
+CREATE SCHEMA IF NOT EXISTS ny_citibike;
 
 -- --------------------------------------------------------------------------
 -- Dimension
 -- --------------------------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS citibike.stations (
+CREATE TABLE IF NOT EXISTS ny_citibike.stations (
     -- Surrogate integer key. GBFS station_id is a *string*
     -- ("2124037125711300644", and some systems use non-numeric ids), and the
     -- join key is the one thing that crosses to the aggregating side on every
@@ -40,13 +40,13 @@ CREATE TABLE IF NOT EXISTS citibike.stations (
     last_seen     timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS stations_geom_gix ON citibike.stations USING GIST (geom);
+CREATE INDEX IF NOT EXISTS stations_geom_gix ON ny_citibike.stations USING GIST (geom);
 
 -- --------------------------------------------------------------------------
 -- Fact
 -- --------------------------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS citibike.station_status (
+CREATE TABLE IF NOT EXISTS ny_citibike.station_status (
     -- Logical replication needs a replica identity. Without a primary key,
     -- ClickPipes refuses the table outright: "cannot be replicated because
     -- they don't have a valid replica identity". REPLICA IDENTITY FULL would
@@ -80,9 +80,9 @@ CREATE TABLE IF NOT EXISTS citibike.station_status (
 -- The two access patterns the workshop actually uses: "this station over time"
 -- (the snapshot diff) and "everything in this window" (the aggregates).
 CREATE INDEX IF NOT EXISTS status_station_time_ix
-    ON citibike.station_status (station_key, polled_at);
+    ON ny_citibike.station_status (station_key, polled_at);
 CREATE INDEX IF NOT EXISTS status_time_ix
-    ON citibike.station_status (polled_at);
+    ON ny_citibike.station_status (polled_at);
 
 -- Deliberately NO foreign key from station_status to stations.
 --
@@ -103,9 +103,9 @@ CREATE INDEX IF NOT EXISTS status_time_ix
 
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'citibike_pub') THEN
-        CREATE PUBLICATION citibike_pub
-            FOR TABLE citibike.stations, citibike.station_status;
+    IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'ny_citibike_pub') THEN
+        CREATE PUBLICATION ny_citibike_pub
+            FOR TABLE ny_citibike.stations, ny_citibike.station_status;
     END IF;
 END
 $$;

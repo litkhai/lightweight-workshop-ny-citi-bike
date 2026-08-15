@@ -46,10 +46,10 @@ apart.
 ```sql
 WITH latest AS (
     SELECT DISTINCT ON (station_key) station_key, num_bikes_available …
-    FROM citibike.station_status ORDER BY station_key, polled_at DESC
+    FROM ny_citibike.station_status ORDER BY station_key, polled_at DESC
 )
 SELECT s.name, l.num_bikes_available, ST_AsText(s.geom)
-FROM latest l JOIN citibike.stations s USING (station_key)
+FROM latest l JOIN ny_citibike.stations s USING (station_key)
 WHERE l.num_bikes_available = 0
 ```
 

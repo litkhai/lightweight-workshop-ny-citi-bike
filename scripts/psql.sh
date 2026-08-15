@@ -3,7 +3,7 @@
 #
 #   ./scripts/psql.sh                          # interactive
 #   ./scripts/psql.sh -f /sql/02-verify.sql    # run a file (sql/ is /sql)
-#   ./scripts/psql.sh -c 'SELECT count(*) FROM citibike.station_status'
+#   ./scripts/psql.sh -c 'SELECT count(*) FROM ny_citibike.station_status'
 #
 # Output is masked so the hostname does not end up in a screenshot.
 
