@@ -44,7 +44,7 @@ cannot be rushed; the rest is copy-paste.
 
 Data volume grows while you work. By module 05 you will have tens of thousands
 of rows — enough to see the plans differ, not enough to see Postgres struggle.
-If you want timings that mean something, leave the collector running overnight
+If you want timings that mean something, leave the pg_cron job running overnight
 and come back: at 3.6M rows a day the aggregates in module 05 get slow enough
 locally that the comparison stops being academic.
 

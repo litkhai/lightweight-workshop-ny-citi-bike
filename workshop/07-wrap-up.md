@@ -27,11 +27,15 @@ down?" is in the plan. You now have three ways to read it: `EXPLAIN` directly,
 
 ## Teardown — read this part
 
-Two paid services are running and the collector is still inserting.
+Two paid services are running and the database is still collecting every minute.
 
-### 1. Stop the containers
+### 1. Stop collecting, and stop the dashboard
+
+The collector is a pg_cron job, so `docker compose down` does **not** stop it.
+Unschedule it first:
 
 ```bash
+./scripts/psql.sh -c "SELECT cron.unschedule('gbfs-collect')"
 docker compose down
 ```
 
@@ -74,9 +78,11 @@ is the other way this gets expensive.
 
 This workshop runs two small managed services for about two hours. On trial
 credit that is comfortably free. On a paid account it is small but not zero,
-and the variable that actually matters is **how long you leave the collector
-running afterwards** — at 3.6M rows a day the Postgres storage grows steadily,
-and every one of those rows also replicates.
+and the variable that actually matters is **how long you leave the pg_cron job
+scheduled afterwards.** Closing your laptop does not stop it — that is the
+point of an in-database collector, and also its one trap. At 3.6M rows a day
+the Postgres storage grows steadily, and every one of those rows replicates
+too.
 
 If you want to leave it running to get to the interesting data volumes, that is
 a legitimate choice. Just make it deliberately, and set a calendar reminder to
@@ -88,7 +94,7 @@ tear it down.
 aggregates and watch the verdict change. Understanding the failure mode is
 worth more than seeing the success case twice.
 
-**Try a different city.** Set `GBFS_URL` to another system from
+**Try a different city.** Update `bike.feed.discovery_url` to another system from
 [the registry](https://github.com/MobilityData/gbfs/blob/master/systems.csv).
 Everything else works unchanged — the map re-centres itself from the data.
 

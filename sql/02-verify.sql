@@ -6,8 +6,23 @@
 \echo '== extensions =='
 SELECT extname, extversion
 FROM pg_extension
-WHERE extname IN ('postgis', 'pg_clickhouse')
+WHERE extname IN ('postgis', 'plperlu', 'pg_cron', 'pg_clickhouse')
 ORDER BY extname;
+
+\echo ''
+\echo '== the collector, which is the database itself =='
+SELECT j.jobname, j.schedule, j.active,
+       (SELECT status FROM cron.job_run_details d
+         WHERE d.jobid = j.jobid ORDER BY runid DESC LIMIT 1) AS last_run,
+       (SELECT count(*) FROM cron.job_run_details d
+         WHERE d.jobid = j.jobid AND status = 'failed')       AS failures
+FROM cron.job j
+WHERE j.jobname = 'gbfs-collect';
+
+SELECT to_char(last_poll_at, 'HH24:MI:SS') AS last_poll,
+       last_poll_result,
+       station_status_url
+FROM bike.feed WHERE id = 1;
 
 \echo ''
 \echo '== stations (the dimension) =='

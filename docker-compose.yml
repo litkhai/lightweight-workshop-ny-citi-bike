@@ -1,30 +1,14 @@
-# Both containers read .env from this directory automatically.
+# One container: the dashboard. It reads .env from this directory automatically.
 #
-#   docker compose up -d collector     # start the live feed
-#   docker compose logs -f collector   # watch it
-#   docker compose up -d ui            # the dashboard, http://localhost:8080
-#   docker compose down                # stop everything
+#   docker compose up -d --build ui     # http://localhost:8080
+#   docker compose down
 #
-# Nothing is stored in a volume. All state lives in your Managed Postgres
-# service, which is the point — these two containers are disposable.
+# There is deliberately no collector service here. The feed is pulled by the
+# database itself — a plperlu function on a pg_cron schedule, installed by
+# sql/03-collector-in-db.sql. Nothing has to stay running on your laptop for
+# data to keep arriving, which also means closing it does not stop collection.
 
 services:
-  collector:
-    build: ./collector
-    container_name: citibike-collector
-    environment:
-      PGHOST:     ${PGHOST:?set PGHOST in .env}
-      PGPORT:     ${PGPORT:-5432}
-      PGUSER:     ${PGUSER:-postgres}
-      PGPASSWORD: ${PGPASSWORD:?set PGPASSWORD in .env}
-      PGDATABASE: ${PGDATABASE:-postgres}
-      PGSSLMODE:  ${PGSSLMODE:-require}
-
-      GBFS_URL:      ${GBFS_URL:-https://gbfs.citibikenyc.com/gbfs/2.3/gbfs.json}
-      GBFS_LANG:     ${GBFS_LANG:-en}
-      POLL_SECONDS:  ${POLL_SECONDS:-60}
-    restart: unless-stopped
-
   ui:
     build: ./ui
     container_name: citibike-ui

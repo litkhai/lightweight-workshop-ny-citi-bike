@@ -26,7 +26,7 @@ them locally. So every query here ends with a verdict read out of the plan.
 
 ```text
 Citi Bike GBFS            public JSON · no API key · ~2,500 stations · refreshed every 60s
-      │  poll
+      │  pulled by the database itself — plperlu + pg_cron, no container
       ▼
 ClickHouse Managed Postgres
       bike.stations        PostGIS points  · 2,500 rows      · barely changes
@@ -49,7 +49,7 @@ whole trick.
 
 ## Requirements
 
-- **Docker Desktop or Docker Engine with Compose v2** — `psql`, the collector and the dashboard all run in containers; nothing else is installed
+- **Docker Desktop or Docker Engine with Compose v2** — `psql` and the dashboard run in containers; nothing else is installed, and the collector needs no container because the database runs it
 - **A ClickHouse Cloud account** — both services live there; a new organization starts with trial credit
 - `curl`, `git`, and a browser
 
@@ -76,12 +76,11 @@ two services in [module 01](workshop/01-provision.md):
 ```bash
 cp .env.example .env && $EDITOR .env      # paste both sets of credentials
 
-./scripts/psql.sh -f /sql/01-schema.sql   # PostGIS schema + publication
-docker compose up -d --build collector    # the live feed starts here
-docker compose logs -f collector
+./scripts/psql.sh -f /sql/01-schema.sql          # PostGIS schema + publication
+./scripts/psql.sh -f /sql/03-collector-in-db.sql # the database starts pulling the feed
+./scripts/psql.sh -f /sql/02-verify.sql          # is it moving?
 
-./scripts/psql.sh -f /sql/02-verify.sql   # is it moving?
-docker compose up -d --build ui           # http://localhost:8080
+docker compose up -d --build ui                  # http://localhost:8080
 ```
 
 ## Modules
@@ -106,11 +105,13 @@ organization-wide API key. Everything else runs from this repository.
 
 ```text
 workshop/       the guide — also published as the documentation site
-sql/            01 schema · 02 verify · 10 spatial · 20 aggregates
-                30 snapshot-to-events · 40 pg_clickhouse FDW
+sql/            01 schema · 02 verify · 03 the collector, in the database
+                10 spatial · 20 aggregates · 30 snapshot-to-events
+                40 pg_clickhouse FDW
 scripts/        preflight · psql (containerised) · explain-pushdown
-collector/      polls GBFS, COPYs snapshots into Postgres
 ui/             the dashboard — two files, stdlib + psycopg
+collector/      a container that does the same pull from outside — fallback
+                for services that will not permit plperlu
 ```
 
 ## Using a different city
@@ -118,8 +119,15 @@ ui/             the dashboard — two files, stdlib + psycopg
 Nothing is New York-specific except the map's initial centre. Any **docked**
 system in the
 [GBFS registry](https://github.com/MobilityData/gbfs/blob/master/systems.csv)
-works — over 1,500 of them, none requiring a key. Set `GBFS_URL` in `.env` to
-its discovery URL and everything else is unchanged.
+works — over 1,500 of them, none requiring a key. The feed URL is a row in the
+database, so switching city is one statement:
+
+```sql
+UPDATE bike.feed SET discovery_url =
+  'https://gbfs.lyft.com/gbfs/2.3/dca-cabi/gbfs.json' WHERE id = 1;
+CALL bike.discover();
+CALL bike.load_stations();
+```
 
 ## Credentials
 
@@ -139,8 +147,13 @@ that overstates its own testing wastes the reader's time when it breaks.
 
 - the GBFS discovery chain, and that the files are served from a different host than the registry lists
 - `sql/01-schema.sql`, `02-verify.sql`, `10-spatial-postgres.sql`, `20-aggregate-pushdown.sql`, `30-snapshot-to-events.sql`
-- the collector, end to end — 2,509 stations, real snapshots, and its duplicate-snapshot skip
+- the in-database collector end to end — `plperlu` fetching 1,073,813 bytes of live JSON over HTTPS, 2,509 stations loaded with geometry, and `pg_cron` firing every minute
+- the duplicate-snapshot skip under pg_cron — three scheduled runs produced two stored snapshots
 - the plan shape of the window query, which turned out to be index-covered rather than sorting (module 05 says so)
+
+Verified on PostgreSQL 17 with PostGIS 3.6.4, plperlu 1.0 and pg_cron 1.6 — the
+same extension versions ClickHouse Managed Postgres publishes, which is why the
+in-database collector is worth trusting before you try it on a real service.
 
 **Written from the product documentation, not yet run end to end:** modules
 [01](workshop/01-provision.md) (provisioning), [04](workshop/04-clickpipes.md)
@@ -148,6 +161,13 @@ that overstates its own testing wastes the reader's time when it breaks.
 dashboard's ClickHouse side. Those need two paid cloud services and an account,
 and the console walkthroughs describe what to look for rather than quoting
 button labels that will drift.
+
+One dependency is genuinely unverifiable from here: whether your service will
+permit `CREATE EXTENSION plperlu`, which needs superuser, and whether its host
+carries a CA bundle Perl can find. `./scripts/preflight.sh` answers the first
+before you spend time on it, and `bike.http_get()` raises a named error rather
+than a timeout for the second. If plperlu is refused, `collector/` does the
+same pull from a container.
 
 If a step in those modules does not match what you see, that is worth an
 [issue](https://github.com/litkhai/lightweight-workshop-ny-citi-bike/issues).

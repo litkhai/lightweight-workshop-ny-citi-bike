@@ -141,7 +141,7 @@ Compare against Postgres:
 ./scripts/psql.sh -c "SELECT count(*) FROM bike.station_status"
 ```
 
-They will not match exactly, and that is correct — the collector is still
+They will not match exactly, and that is correct — the database is still
 inserting while you look. What matters is that ClickHouse's `max(polled_at)` is
 within a minute or two of now.
 

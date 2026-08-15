@@ -21,7 +21,7 @@ the **execution plan**, not out of a stopwatch.
 
 ```text
 Citi Bike GBFS            public JSON, no API key, ~2,500 stations, refreshed every 60s
-      │  poll
+      │  pulled by the database itself — plperlu + pg_cron, no container
       ▼
 ClickHouse Managed Postgres
       bike.stations        PostGIS points  · 2,500 rows  · barely changes

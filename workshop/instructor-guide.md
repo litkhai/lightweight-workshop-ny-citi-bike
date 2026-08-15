@@ -28,7 +28,7 @@ not spent on the actual content.
 console changes, and the feed is a live third-party dependency.
 
 **Check the feed on the morning of.** `./scripts/preflight.sh`. If Citi Bike is
-down, switch `GBFS_URL` to Capital Bikeshare and mention it; nothing else
+down, point `bike.feed.discovery_url` at Capital Bikeshare and mention it; nothing else
 changes.
 
 **Have your own services already provisioned.** When somebody's pipe will not
@@ -63,7 +63,7 @@ where it came from. What else in your stack has that problem?"
 ## Small groups and shared services
 
 If accounts are a problem, one shared pair of services works. Give everyone
-read-only Postgres credentials, run one collector, and have participants do
+read-only Postgres credentials, schedule one collector, and have participants do
 modules 02–06 read-only. They lose the schema creation and the ClickPipe setup,
 which are the two most valuable console skills — so prefer individual accounts
 if you can.
@@ -79,7 +79,7 @@ Module 05 shows Postgres handling the window function *well*, because the
 module-02 index covers exactly that ordering. The real answer is the one that
 survives scrutiny: you can index for one access path, not for all of them, and
 the second and third analytical question you ask will not be covered. Leave the
-collector running overnight and demonstrate that with a second window over a
+job running overnight and demonstrate that with a second window over a
 different key.
 
 **"Is the pushdown always this good?"** No, and module 05 says so about window

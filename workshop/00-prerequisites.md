@@ -10,7 +10,7 @@ Have everything installed and verified before you create anything that bills.
 
 | | Why |
 |---|---|
-| **Docker Desktop / Engine with Compose v2** | Everything runs in containers — `psql`, the collector, the dashboard. Nothing else gets installed on your machine |
+| **Docker Desktop / Engine with Compose v2** | `psql` and the dashboard run in containers. Nothing gets installed on your machine — and the collector needs no container at all, because the database runs it |
 | **A ClickHouse Cloud account** | Both services live here. A new account starts with trial credit |
 | **`curl` and `git`** | Fetching the repo and probing the feed |
 | **A browser** | Two modules are console work |
@@ -71,17 +71,21 @@ Nothing in this workshop is New York-specific except the map's initial centre.
 Any **docked** system works — dockless scooter feeds have no stations to join
 to, so they will not do.
 
-Set `GBFS_URL` in your `.env` to another system's discovery URL:
+The feed URL lives in the database, not in a config file. After module 02 you
+change it with one statement:
 
-```bash
-# Capital Bikeshare, Washington DC — 860 stations
-GBFS_URL=https://gbfs.lyft.com/gbfs/2.3/dca-cabi/gbfs.json
+```sql
+-- Capital Bikeshare, Washington DC — 860 stations
+UPDATE bike.feed SET discovery_url =
+  'https://gbfs.lyft.com/gbfs/2.3/dca-cabi/gbfs.json' WHERE id = 1;
+CALL bike.discover();
+CALL bike.load_stations();
 ```
 
 !!! note "Always start from the discovery URL, never a data file"
     The host serving the JSON is frequently not the one in the registry. Citi
     Bike registers `gbfs.citibikenyc.com` and serves from `gbfs.lyft.com`. The
-    collector follows the chain properly; if you hardcode a URL you found in a
+    `bike.discover()` follows the chain properly; if you hardcode a URL from a
     blog post, you will be reading a stale mirror.
 
 ## Next

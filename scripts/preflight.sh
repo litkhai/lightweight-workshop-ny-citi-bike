@@ -50,10 +50,29 @@ if [ -f "$LAB_DIR/.env" ]; then
         pg=$(psql_run -tAc \
             "SELECT count(*) FROM pg_available_extensions WHERE name='postgis'" 2>/dev/null)
         [ "$pg" = "1" ] && ok "postgis is available" || bad "postgis not available"
+
+        # The collector runs inside the database, so these two are not
+        # optional niceties — without them there is nothing to collect with.
+        pl=$(psql_run -tAc \
+            "SELECT count(*) FROM pg_available_extensions WHERE name='plperlu'" 2>/dev/null)
+        [ "$pl" = "1" ] && ok "plperlu is available (the feed's only route in)" \
+                        || bad "plperlu not available — the in-database collector cannot run"
+        cr=$(psql_run -tAc \
+            "SELECT count(*) FROM pg_available_extensions WHERE name='pg_cron'" 2>/dev/null)
+        [ "$cr" = "1" ] && ok "pg_cron is available" \
+                        || bad "pg_cron not available — nothing would schedule the collector"
+
         ch=$(psql_run -tAc \
             "SELECT count(*) FROM pg_available_extensions WHERE name='pg_clickhouse'" 2>/dev/null)
         [ "$ch" = "1" ] && ok "pg_clickhouse is available" \
                         || warn "pg_clickhouse not available — module 05 will not run"
+
+        # Creating an untrusted language needs superuser, and having the
+        # extension on the shelf is not the same as being allowed to install
+        # it. Ask the question that actually matters.
+        su=$(psql_run -tAc "SELECT rolsuper FROM pg_roles WHERE rolname = current_user" 2>/dev/null)
+        [ "$su" = "t" ] && ok "$PGUSER can create untrusted languages" \
+                        || warn "$PGUSER is not a superuser — 'CREATE EXTENSION plperlu' may be refused"
         wal=$(psql_run -tAc "SELECT current_setting('wal_level')" 2>/dev/null)
         [ "$wal" = "logical" ] && ok "wal_level = logical (ClickPipes can replicate)" \
                                || warn "wal_level = $wal — ClickPipes needs 'logical'"
