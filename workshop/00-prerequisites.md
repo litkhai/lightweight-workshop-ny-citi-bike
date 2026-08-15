@@ -76,16 +76,16 @@ change it with one statement:
 
 ```sql
 -- Capital Bikeshare, Washington DC — 860 stations
-UPDATE bike.feed SET discovery_url =
+UPDATE citibike.feed SET discovery_url =
   'https://gbfs.lyft.com/gbfs/2.3/dca-cabi/gbfs.json' WHERE id = 1;
-CALL bike.discover();
-CALL bike.load_stations();
+CALL citibike.discover();
+CALL citibike.load_stations();
 ```
 
 !!! note "Always start from the discovery URL, never a data file"
     The host serving the JSON is frequently not the one in the registry. Citi
     Bike registers `gbfs.citibikenyc.com` and serves from `gbfs.lyft.com`. The
-    `bike.discover()` follows the chain properly; if you hardcode a URL from a
+    `citibike.discover()` follows the chain properly; if you hardcode a URL from a
     blog post, you will be reading a stale mirror.
 
 ## Next

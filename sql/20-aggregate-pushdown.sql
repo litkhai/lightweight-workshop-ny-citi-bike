@@ -6,15 +6,15 @@
 --
 -- The schema is a psql variable so the same file runs against either side:
 --
---   ./scripts/psql.sh -v s=bike -f /sql/20-aggregate-pushdown.sql   # local
---   ./scripts/psql.sh -v s=ch   -f /sql/20-aggregate-pushdown.sql   # ClickHouse
+--   ./scripts/psql.sh -v s=citibike -f /sql/20-aggregate-pushdown.sql   # local
+--   ./scripts/psql.sh -v s=citibike_ch   -f /sql/20-aggregate-pushdown.sql   # ClickHouse
 --
 -- Run both and compare. Then run scripts/explain-pushdown.sh to find out
 -- whether the second one actually pushed down, or just dragged the rows back.
 
 \if :{?s}
 \else
-  \set s bike
+  \set s citibike
 \endif
 
 \echo ''

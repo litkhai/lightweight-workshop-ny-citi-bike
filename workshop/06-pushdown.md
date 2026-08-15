@@ -1,6 +1,6 @@
-# 05 — Push the counting down
+# 06 — Push the counting down
 
-**[Previous](04-clickpipes.md) · [Workshop home](index.md) · [Next: The dashboard](06-dashboard.md)**
+**[Previous](05-clickpipes.md) · [Workshop home](index.md) · [Next: The dashboard](07-dashboard.md)**
 
 ## Goal
 
@@ -18,13 +18,13 @@ then prove — from the plan, not the clock — that the counting runs remotely.
 ```
 
 That creates the extension, a foreign server, a user mapping, and imports the
-two ClickHouse tables into a **separate schema called `ch`**.
+two ClickHouse tables into a **separate schema called `citibike_ch`**.
 
 Keeping the namespaces apart is what makes the rest legible:
 
 ```text
-bike.station_status   local Postgres
-ch.station_status     the same data, on ClickHouse
+citibike.station_status      local Postgres
+citibike_ch.station_status   the same data, on ClickHouse
 ```
 
 The same query text against either one tells you where the work went.
@@ -43,8 +43,8 @@ The script ends with two `EXPLAIN`s. Here is what to read.
 ```sql
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT st.name, count(*), round(avg(ss.num_bikes_available), 1)
-FROM ch.station_status ss
-JOIN ch.stations st ON st.station_key = ss.station_key
+FROM citibike_ch.station_status ss
+JOIN citibike_ch.stations st ON st.station_key = ss.station_key
 GROUP BY st.name ORDER BY count(*) DESC LIMIT 10;
 ```
 
@@ -54,11 +54,11 @@ rows.
 
 ### The counter-example
 
-Same query, one word different — `bike.stations` instead of `ch.stations`:
+Same query, one word different — `citibike.stations` instead of `citibike_ch.stations`:
 
 ```sql
-FROM ch.station_status ss
-JOIN bike.stations st ON st.station_key = ss.station_key
+FROM citibike_ch.station_status ss
+JOIN citibike.stations st ON st.station_key = ss.station_key
 ```
 
 Now the `Remote SQL` selects **columns only**, and there is a `Hash Join` and a
@@ -68,17 +68,17 @@ joined and counted in Postgres.
 !!! danger "This is the failure mode to remember"
     Mixing one local table into a join collapses the pushdown. It does not
     error, it does not warn, and at small data volumes it does not even feel
-    slow. It is why module 04 insisted on replicating both tables.
+    slow. It is why module 05 insisted on replicating both tables.
 
 ## Reading the verdict without reading the plan
 
 ```bash
 ./scripts/explain-pushdown.sh \
-  "SELECT count(*) FROM ch.station_status"
+  "SELECT count(*) FROM citibike_ch.station_status"
 
 ./scripts/explain-pushdown.sh \
-  "SELECT st.name, count(*) FROM ch.station_status ss
-   JOIN bike.stations st ON st.station_key = ss.station_key GROUP BY st.name"
+  "SELECT st.name, count(*) FROM citibike_ch.station_status ss
+   JOIN citibike.stations st ON st.station_key = ss.station_key GROUP BY st.name"
 ```
 
 The script walks the plan and prints one of four verdicts:
@@ -98,8 +98,8 @@ worse than saying nothing.
 ## Run the same file against both sides
 
 ```bash
-./scripts/psql.sh -v s=bike -f /sql/20-aggregate-pushdown.sql   # local
-./scripts/psql.sh -v s=ch   -f /sql/20-aggregate-pushdown.sql   # ClickHouse
+./scripts/psql.sh -v s=citibike    -f /sql/20-aggregate-pushdown.sql # local
+./scripts/psql.sh -v s=citibike_ch -f /sql/20-aggregate-pushdown.sql # ClickHouse
 ```
 
 Identical SQL, one variable different. Compare the `Time:` lines that `\timing`
@@ -118,7 +118,7 @@ To get departures and arrivals you have to diff consecutive snapshots per
 station — a window function partitioned by station over the whole fact table:
 
 ```bash
-./scripts/psql.sh -v s=bike -f /sql/30-snapshot-to-events.sql
+./scripts/psql.sh -v s=citibike -f /sql/30-snapshot-to-events.sql
 ```
 
 The file ends with an `EXPLAIN (ANALYZE, BUFFERS)`. Read it before assuming
@@ -152,7 +152,7 @@ Try it. Add `ORDER BY num_bikes_available` to the window and re-run the
 `EXPLAIN`; watch `Sort Method` appear.
 
 ```bash
-./scripts/psql.sh -v s=ch -f /sql/30-snapshot-to-events.sql
+./scripts/psql.sh -v s=citibike_ch -f /sql/30-snapshot-to-events.sql
 ```
 
 !!! note "Measured, and at what size"
@@ -174,9 +174,9 @@ Try it. Add `ORDER BY num_bikes_available` to the window and re-run the
 Add this to `.env`:
 
 ```bash
-FOREIGN_SCHEMA=ch
+FOREIGN_SCHEMA=citibike_ch
 ```
 
 ## Next
 
-[06 — The dashboard](06-dashboard.md)
+[06 — The dashboard](07-dashboard.md)

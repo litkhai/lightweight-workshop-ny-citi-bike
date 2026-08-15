@@ -1,6 +1,6 @@
-# 03 — The half that cannot move
+# 04 — The half that cannot move
 
-**[Previous](02-postgres-and-feed.md) · [Workshop home](index.md) · [Next: Replicate to ClickHouse](04-clickpipes.md)**
+**[Previous](02-postgres-and-feed.md) · [Workshop home](index.md) · [Next: Replicate to ClickHouse](05-clickpipes.md)**
 
 ## Goal
 
@@ -46,10 +46,10 @@ apart.
 ```sql
 WITH latest AS (
     SELECT DISTINCT ON (station_key) station_key, num_bikes_available …
-    FROM bike.station_status ORDER BY station_key, polled_at DESC
+    FROM citibike.station_status ORDER BY station_key, polled_at DESC
 )
 SELECT s.name, l.num_bikes_available, ST_AsText(s.geom)
-FROM latest l JOIN bike.stations s USING (station_key)
+FROM latest l JOIN citibike.stations s USING (station_key)
 WHERE l.num_bikes_available = 0
 ```
 
@@ -59,7 +59,7 @@ Read that carefully, because it is the workshop in miniature:
 - the **geometry** it joins to is exactly what cannot
 - the **join key** is a `bigint`, which is what makes living apart possible
 
-Right now both halves run in Postgres. After module 05 the first half will run
+Right now both halves run in Postgres. After module 06 the first half will run
 on ClickHouse and the second will not have moved an inch.
 
 ## Why geometry cannot follow
@@ -93,4 +93,4 @@ The one rule that makes the whole arrangement work:
 
 ## Next
 
-[04 — Replicate to ClickHouse](04-clickpipes.md)
+[04 — Replicate to ClickHouse](05-clickpipes.md)

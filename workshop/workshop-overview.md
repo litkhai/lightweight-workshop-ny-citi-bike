@@ -32,20 +32,21 @@ a `bigint`, so no geometry ever has to cross.
 |---|---|---|---|
 | 00 | [Prerequisites](00-prerequisites.md) | 10 min | Docker |
 | 01 | [Provision the two services](01-provision.md) | 20 min | **console** · a ClickHouse Cloud account |
-| 02 | [Postgres, PostGIS and the live feed](02-postgres-and-feed.md) | 15 min | module 01 |
-| 03 | [The half that cannot move](03-spatial.md) | 15 min | ~10 min of collected data |
-| 04 | [Replicate to ClickHouse](04-clickpipes.md) | 20 min | **console** · module 02 |
-| 05 | [Push the counting down](05-pushdown.md) | 25 min | module 04 |
-| 06 | [The dashboard](06-dashboard.md) | 15 min | module 05 |
-| 07 | [Wrap-up and teardown](07-wrap-up.md) | 10 min | — |
+| 02 | [Postgres, PostGIS and the schema](02-postgres-and-feed.md) | 10 min | module 01 |
+| 03 | [The feed, with nothing on your laptop](03-the-feed.md) | 20 min | **console** · module 02 |
+| 04 | [The half that cannot move](04-spatial.md) | 15 min | ~10 min of collected data |
+| 05 | [Replicate to ClickHouse](05-clickpipes.md) | 20 min | **console** · module 03 |
+| 06 | [Push the counting down](06-pushdown.md) | 25 min | module 05 |
+| 07 | [The dashboard](07-dashboard.md) | 15 min | module 06 |
+| 08 | [Wrap-up and teardown](08-wrap-up.md) | 10 min | — |
 
-About **2 hours** of hands-on time. Modules 01 and 04 are console work and
-cannot be rushed; the rest is copy-paste.
+About **2 hours** of hands-on time. Modules 01, 03 and 05 involve the console
+and cannot be rushed; the rest is copy-paste.
 
-Data volume grows while you work. By module 05 you will have tens of thousands
+Data volume grows while you work. By module 06 you will have tens of thousands
 of rows — enough to see the plans differ, not enough to see Postgres struggle.
 If you want timings that mean something, leave the pg_cron job running overnight
-and come back: at 3.6M rows a day the aggregates in module 05 get slow enough
+and come back: at 3.6M rows a day the aggregates in module 06 get slow enough
 locally that the comparison stops being academic.
 
 ## What you will be able to say afterwards

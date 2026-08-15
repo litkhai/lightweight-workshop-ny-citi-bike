@@ -36,7 +36,7 @@ HERE = Path(__file__).parent
 PORT = int(os.environ.get("UI_PORT", "8080"))
 
 # Geometry lives here and never moves.
-LOCAL_SCHEMA = os.environ.get("LOCAL_SCHEMA", "bike")
+LOCAL_SCHEMA = os.environ.get("LOCAL_SCHEMA", "citibike")
 
 # Where module 05 imported the foreign tables. Empty until then; the page says
 # so plainly rather than reporting a failed pushdown.

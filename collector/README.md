@@ -1,16 +1,34 @@
-# `collector/` — the fallback, not the lesson
+# `collector/` — the container alternative
 
-**The workshop does not use this.** The feed is pulled by the database itself:
-a `plperlu` function on a `pg_cron` schedule, installed by
-[`sql/03-collector-in-db.sql`](../sql/03-collector-in-db.sql) and explained in
-[module 02](../workshop/02-postgres-and-feed.md).
+**The workshop does not use this by default.** Ingestion is server-side: a
+ClickHouse refreshable materialized view over `url()` lands the feed, and
+`pg_cron` plus `pg_clickhouse` copy it forward into Postgres. That is
+[module 03](../workshop/03-the-feed.md), and it needs nothing running on your
+laptop.
 
-This directory exists for one situation: **your service will not let you create
-`plperlu`.** Installing an untrusted procedural language needs superuser, and
-having the extension in the catalogue is not the same as being permitted to
-install it. `./scripts/preflight.sh` reports both facts separately.
+This directory is the other way to do it, and it is a legitimate choice:
 
-If that is where you are, this container does the same job from outside.
+- it does not involve ClickHouse in ingestion at all — GBFS goes straight to Postgres
+- it is what you would reach for if your Postgres had an HTTP extension, or if you already run a scheduler somewhere
+- it is easier to reason about: one loop, one process
+
+Its cost is that it needs a machine that stays awake.
+
+## Why the default is not a stored procedure
+
+The obvious design — have Postgres fetch the URL itself — does not work on
+ClickHouse Managed Postgres. There is no `http` extension and no `pg_net` in
+the catalogue. `plperlu` is available and `CREATE EXTENSION plperlu` succeeds,
+but the server's Perl has no TLS:
+
+```text
+IO::Socket::SSL 1.42 must be installed for https support
+Net::SSLeay 1.49 must be installed for https support
+```
+
+Run `sql/03-check-in-db-http.sql` against your own service to confirm. The
+certificates are present; it is the Perl build that lacks TLS, so this is an
+image limitation rather than a permission — and a platform update could lift it.
 
 ## Run it
 
@@ -22,6 +40,12 @@ docker run -d --name citibike-collector --env-file .env \
 docker logs -f citibike-collector
 ```
 
+Or via Compose, which reads `.env` for you:
+
+```bash
+docker compose up -d --build collector
+```
+
 | Variable | Default | |
 |---|---|---|
 | `GBFS_URL` | Citi Bike | Discovery entry point, not a data file |
@@ -31,24 +55,24 @@ docker logs -f citibike-collector
 | `PG*` | from `.env` | |
 
 It writes to exactly the same tables, so every later module works unchanged.
-Skip `sql/03-collector-in-db.sql` entirely if you go this route — running both
-would store each snapshot twice.
+**Skip module 03 if you go this route** — running both would store each
+snapshot twice.
 
-## What it does differently
+## How it compares
 
-Nothing, functionally. It follows the same discovery chain, upserts the same
-dimension, and applies the same duplicate-snapshot skip by comparing the feed's
-`last_updated` against the last one stored.
-
-The difference is operational, and it is the reason the database version is
-preferred:
-
-| | in-database | this container |
+| | server-side (module 03) | this container |
 |---|---|---|
 | Keeps running when you close the laptop | yes | only if the container is somewhere that stays up |
-| Moving parts | none | one |
-| Needs `plperlu` (superuser) | yes | no |
-| Where the feed URL lives | a row in `bike.feed` | an environment variable |
+| Schedulers involved | two: ClickHouse RMV + pg_cron | one: the loop in `collect.py` |
+| Needs ClickHouse for ingestion | yes | no |
+| Data path | GBFS → ClickHouse → Postgres | GBFS → Postgres |
+| Where the feed URL lives | the RMV definition | an environment variable |
+| Duplicate snapshots handled by | `ReplacingMergeTree` at merge time | comparing `last_updated` before writing |
+
+Both follow the GBFS discovery chain rather than hardcoding a data URL, which
+matters because the host serving the files is frequently not the one in the
+registry — Citi Bike registers `gbfs.citibikenyc.com` and serves from
+`gbfs.lyft.com`.
 
 ## License
 

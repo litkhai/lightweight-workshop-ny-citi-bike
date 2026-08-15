@@ -24,8 +24,8 @@ Citi Bike GBFS            public JSON, no API key, ~2,500 stations, refreshed ev
       │  pulled by the database itself — plperlu + pg_cron, no container
       ▼
 ClickHouse Managed Postgres
-      bike.stations        PostGIS points  · 2,500 rows  · barely changes
-      bike.station_status  snapshots       · +3.6M rows/day · only ever counted
+      citibike.stations        PostGIS points  · 2,500 rows  · barely changes
+      citibike.station_status  snapshots       · +3.6M rows/day · only ever counted
       │  ClickPipes (Postgres CDC)
       ▼
 ClickHouse Cloud
@@ -62,5 +62,5 @@ repository with Docker and nothing else installed.
 !!! warning "This costs money"
     Two paid cloud services run for the duration. Both are small, and the
     workshop uses trial-sized instances, but they are not free. Module
-    [07 — Wrap-up](07-wrap-up.md) has the teardown, and you should read the
+    [07 — Wrap-up](08-wrap-up.md) has the teardown, and you should read the
     cost note there **before** you start rather than after.

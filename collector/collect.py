@@ -135,7 +135,7 @@ def upsert_stations(conn, url):
             for r in rows:
                 cp.write_row(r)
         cur.execute("""
-            INSERT INTO bike.stations
+            INSERT INTO citibike.stations
                 (station_id, name, short_name, lat, lon, capacity, region_id, geom)
             SELECT station_id, name, short_name, lat, lon, capacity, region_id,
                    ST_SetSRID(ST_MakePoint(lon, lat), 4326)
@@ -150,7 +150,7 @@ def upsert_stations(conn, url):
                 geom       = EXCLUDED.geom,
                 last_seen  = now()
         """)
-        cur.execute("SELECT station_id, station_key FROM bike.stations")
+        cur.execute("SELECT station_id, station_key FROM citibike.stations")
         keys = dict(cur.fetchall())
     conn.commit()
     log(f"stations: {len(rows)} in feed, {len(keys)} known")
@@ -214,7 +214,7 @@ def poll_status(conn, url, keys, si_url, last_seen_poll):
     buf.seek(0)
 
     with conn.cursor() as cur:
-        with cur.copy("""COPY bike.station_status
+        with cur.copy("""COPY citibike.station_status
             (station_key, polled_at, last_reported,
              num_bikes_available, num_ebikes_available, num_docks_available,
              num_bikes_disabled, num_docks_disabled,

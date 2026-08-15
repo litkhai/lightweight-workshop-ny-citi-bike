@@ -1,6 +1,6 @@
-# 06 — The dashboard
+# 07 — The dashboard
 
-**[Previous](05-pushdown.md) · [Workshop home](index.md) · [Next: Wrap-up and teardown](07-wrap-up.md)**
+**[Previous](06-pushdown.md) · [Workshop home](index.md) · [Next: Wrap-up and teardown](08-wrap-up.md)**
 
 ## Goal
 
@@ -43,7 +43,7 @@ exact text that went to ClickHouse.
     The side switch only appears once `FOREIGN_SCHEMA` is set and foreign
     tables exist. Before that the page says so plainly instead of showing a
     disabled button, because "not configured yet" and "broken" should not look
-    the same. Set `FOREIGN_SCHEMA=ch` in `.env` and
+    the same. Set `FOREIGN_SCHEMA=citibike_ch` in `.env` and
     `docker compose up -d ui` again.
 
 ## How the verdict is decided
@@ -84,4 +84,4 @@ files.
 
 ## Next
 
-[07 — Wrap-up and teardown](07-wrap-up.md)
+[07 — Wrap-up and teardown](08-wrap-up.md)

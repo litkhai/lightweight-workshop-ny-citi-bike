@@ -28,7 +28,7 @@ not spent on the actual content.
 console changes, and the feed is a live third-party dependency.
 
 **Check the feed on the morning of.** `./scripts/preflight.sh`. If Citi Bike is
-down, point `bike.feed.discovery_url` at Capital Bikeshare and mention it; nothing else
+down, point `citibike.feed.discovery_url` at Capital Bikeshare and mention it; nothing else
 changes.
 
 **Have your own services already provisioned.** When somebody's pipe will not
@@ -44,27 +44,27 @@ explicitly both times.
 
 **Replicating only the big table.** It is the intuitive optimisation — why
 copy 2,500 rows? — and it silently breaks the pushdown two modules later. If
-someone reaches module 05 and only ever gets `dragged`, this is why. Consider
+someone reaches module 06 and only ever gets `dragged`, this is why. Consider
 letting one person make the mistake deliberately; the counter-example teaches
 better than the warning does.
 
 ## Discussion prompts that work
 
-**After module 03:** "What would you have to give up to put all of this in one
+**After module 04:** "What would you have to give up to put all of this in one
 engine?" Gets at the actual trade-off rather than a feature comparison.
 
-**After module 05, showing the failed pushdown:** "How would you have caught
+**After module 06, showing the failed pushdown:** "How would you have caught
 this in production?" The answer — you would not, unless you were reading plans
 — is the most valuable thing in the workshop.
 
-**After module 06:** "This dashboard exists because a number cannot tell you
+**After module 07:** "This dashboard exists because a number cannot tell you
 where it came from. What else in your stack has that problem?"
 
 ## Small groups and shared services
 
 If accounts are a problem, one shared pair of services works. Give everyone
 read-only Postgres credentials, schedule one collector, and have participants do
-modules 02–06 read-only. They lose the schema creation and the ClickPipe setup,
+modules 02–07 read-only. They lose the schema creation and the ClickPipe setup,
 which are the two most valuable console skills — so prefer individual accounts
 if you can.
 
@@ -82,7 +82,7 @@ the second and third analytical question you ask will not be covered. Leave the
 job running overnight and demonstrate that with a second window over a
 different key.
 
-**"Is the pushdown always this good?"** No, and module 05 says so about window
+**"Is the pushdown always this good?"** No, and module 06 says so about window
 functions specifically. The honest framing: pushdown works well for the shape
 this workload has — filter, group, aggregate — and you should verify per query
 rather than assume.
@@ -95,6 +95,6 @@ elsewhere is a vendor-built Postgres extension for exactly this pattern.
 ## Teardown is part of the session
 
 Do not send people away with two running services and good intentions. Walk
-through [module 07](07-wrap-up.md) together, and specifically check
+through [module 08](08-wrap-up.md) together, and specifically check
 `pg_replication_slots` after the pipe is deleted. An orphaned slot found weeks
 later is a bad memory of your workshop.

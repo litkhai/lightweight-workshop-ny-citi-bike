@@ -1,6 +1,6 @@
 -- Point Postgres at ClickHouse with pg_clickhouse.
 --
--- Run this AFTER ClickPipes has replicated bike.stations and bike.station_status
+-- Run this AFTER ClickPipes has replicated citibike.stations and citibike.station_status
 -- into ClickHouse Cloud. It does not move any data; it teaches Postgres how to
 -- reach tables that already exist on the other side.
 --
@@ -34,14 +34,14 @@ CREATE EXTENSION IF NOT EXISTS pg_clickhouse;
 -- Server and credentials
 -- --------------------------------------------------------------------------
 
-DROP SERVER IF EXISTS clickhouse_svr CASCADE;
+DROP SERVER IF EXISTS citibike_ch_svr CASCADE;
 
-CREATE SERVER clickhouse_svr
+CREATE SERVER citibike_ch_svr
     FOREIGN DATA WRAPPER clickhouse_fdw
     OPTIONS (host :'ch_host', port '8443', dbname :'ch_db', secure 'true');
 
 CREATE USER MAPPING FOR CURRENT_USER
-    SERVER clickhouse_svr
+    SERVER citibike_ch_svr
     OPTIONS (user :'ch_user', password :'ch_pass');
 
 -- --------------------------------------------------------------------------
@@ -49,17 +49,17 @@ CREATE USER MAPPING FOR CURRENT_USER
 -- --------------------------------------------------------------------------
 --
 -- A separate schema, not `bike`. Keeping the two namespaces apart is what
--- makes the demo legible: `bike.station_status` is local, `ch.station_status`
+-- makes the demo legible: `citibike.station_status` is local, `citibike_ch.station_status`
 -- is remote, and the same query text against either one tells you where the
 -- work went.
 
-DROP SCHEMA IF EXISTS ch CASCADE;
-CREATE SCHEMA ch;
+DROP SCHEMA IF EXISTS citibike_ch CASCADE;
+CREATE SCHEMA citibike_ch;
 
 IMPORT FOREIGN SCHEMA :"ch_db"
     LIMIT TO (stations, station_status)
-    FROM SERVER clickhouse_svr
-    INTO ch;
+    FROM SERVER citibike_ch_svr
+    INTO citibike_ch;
 
 -- --------------------------------------------------------------------------
 -- Did it work?
@@ -73,9 +73,9 @@ ORDER BY 1, 2;
 
 \echo ''
 \echo '== row counts on each side =='
-SELECT 'postgres' AS side, count(*) FROM bike.station_status
+SELECT 'postgres' AS side, count(*) FROM citibike.station_status
 UNION ALL
-SELECT 'clickhouse',       count(*) FROM ch.station_status;
+SELECT 'clickhouse',       count(*) FROM citibike_ch.station_status;
 
 \echo ''
 \echo '== the moment of truth: does the aggregate go remote? =='
@@ -84,8 +84,8 @@ SELECT 'clickhouse',       count(*) FROM ch.station_status;
 -- counted here — which is a failure, however fast it felt.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT st.name, count(*), round(avg(ss.num_bikes_available), 1)
-FROM ch.station_status ss
-JOIN ch.stations st ON st.station_key = ss.station_key
+FROM citibike_ch.station_status ss
+JOIN citibike_ch.stations st ON st.station_key = ss.station_key
 GROUP BY st.name
 ORDER BY count(*) DESC
 LIMIT 10;
@@ -97,8 +97,8 @@ LIMIT 10;
 -- the single most common way a pushdown quietly stops working.
 EXPLAIN (VERBOSE, COSTS OFF)
 SELECT st.name, count(*), round(avg(ss.num_bikes_available), 1)
-FROM ch.station_status ss
-JOIN bike.stations st ON st.station_key = ss.station_key
+FROM citibike_ch.station_status ss
+JOIN citibike.stations st ON st.station_key = ss.station_key
 GROUP BY st.name
 ORDER BY count(*) DESC
 LIMIT 10;

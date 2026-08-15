@@ -1,6 +1,6 @@
-# 04 — Replicate to ClickHouse
+# 05 — Replicate to ClickHouse
 
-**[Previous](03-spatial.md) · [Workshop home](index.md) · [Next: Push the counting down](05-pushdown.md)**
+**[Previous](04-spatial.md) · [Workshop home](index.md) · [Next: Push the counting down](06-pushdown.md)**
 
 ## Goal
 
@@ -34,7 +34,7 @@ You want:
 | Check | Required | Why |
 |---|---|---|
 | `wal_level` | `logical` | Logical decoding is how CDC reads changes |
-| publication | `bike_pub`, 2 tables | Created by `sql/01-schema.sql` |
+| publication | `citibike_pub`, 2 tables | Created by `sql/01-schema.sql` |
 | replica identity | `default (primary key)` on both | Without it the pipe refuses the table |
 
 All three are set up by module 02 on a stock Managed Postgres service. If
@@ -76,8 +76,8 @@ which of the three preconditions is missing.
 
 Select **both**:
 
-- `bike.stations`
-- `bike.station_status`
+- `citibike.stations`
+- `citibike.station_status`
 
 !!! danger "Replicate both, or the pushdown will not work"
     It is tempting to replicate only the big fact table and keep the small
@@ -86,7 +86,7 @@ Select **both**:
     `pg_clickhouse` can push a join down only when **every** table in it lives
     on the same remote server. Join a foreign `station_status` to a local
     `stations` and the join has to happen in Postgres, which means every row
-    comes back over the network first. You will see exactly this in module 05 —
+    comes back over the network first. You will see exactly this in module 06 —
     it is the counter-example — but you need both tables replicated to see the
     working case at all.
 
@@ -138,7 +138,7 @@ SELECT max(polled_at) FROM default.station_status;
 Compare against Postgres:
 
 ```bash
-./scripts/psql.sh -c "SELECT count(*) FROM bike.station_status"
+./scripts/psql.sh -c "SELECT count(*) FROM citibike.station_status"
 ```
 
 They will not match exactly, and that is correct — the database is still
@@ -158,8 +158,8 @@ consuming, forever, waiting for a consumer that is not coming back.
 
 This is the single most common way a Postgres CDC setup takes down a database.
 Put that query in whatever you monitor, and see
-[module 07](07-wrap-up.md) for cleaning it up properly at the end.
+[module 08](08-wrap-up.md) for cleaning it up properly at the end.
 
 ## Next
 
-[05 — Push the counting down](05-pushdown.md)
+[05 — Push the counting down](06-pushdown.md)

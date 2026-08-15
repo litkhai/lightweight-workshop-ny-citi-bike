@@ -1,7 +1,7 @@
 # `ui/` — how the dashboard works
 
 Implementation notes. What the tabs *show* is in
-[module 06](../workshop/06-dashboard.md); this is what is behind them.
+[module 07](../workshop/07-dashboard.md); this is what is behind them.
 
 Two files: `app.py` (stdlib plus `psycopg`) and `index.html` (no build step, no
 bundle). The image is `python:3.12-slim` with `psycopg[binary]`.

@@ -59,12 +59,13 @@ nav:
       - Overview: workshop-overview.md
       - "00 · Prerequisites": 00-prerequisites.md
       - "01 · Provision the services": 01-provision.md
-      - "02 · Postgres and the live feed": 02-postgres-and-feed.md
-      - "03 · The half that cannot move": 03-spatial.md
-      - "04 · Replicate to ClickHouse": 04-clickpipes.md
-      - "05 · Push the counting down": 05-pushdown.md
-      - "06 · The dashboard": 06-dashboard.md
-      - "07 · Wrap-up and teardown": 07-wrap-up.md
+      - "02 · Postgres and PostGIS": 02-postgres-and-feed.md
+      - "03 · The feed": 03-the-feed.md
+      - "04 · The half that cannot move": 04-spatial.md
+      - "05 · Replicate to ClickHouse": 05-clickpipes.md
+      - "06 · Push the counting down": 06-pushdown.md
+      - "07 · The dashboard": 07-dashboard.md
+      - "08 · Wrap-up and teardown": 08-wrap-up.md
   - Operations:
       - Instructor Guide: instructor-guide.md
 

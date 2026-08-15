@@ -26,11 +26,14 @@ them locally. So every query here ends with a verdict read out of the plan.
 
 ```text
 Citi Bike GBFS            public JSON · no API key · ~2,500 stations · refreshed every 60s
-      │  pulled by the database itself — plperlu + pg_cron, no container
+      │  ClickHouse refreshable MV over url(), every minute
+      ▼
+ClickHouse Cloud   citibike.gbfs_status          ← landing
+      │  pg_clickhouse foreign table + pg_cron, every minute
       ▼
 ClickHouse Managed Postgres
-      bike.stations        PostGIS points  · 2,500 rows      · barely changes
-      bike.station_status  snapshots       · +3.6M rows/day  · only ever counted
+      citibike.stations        PostGIS points  · 2,500 rows      · barely changes
+      citibike.station_status  snapshots       · +3.6M rows/day  · only ever counted
       │  ClickPipes (Postgres CDC)
       ▼
 ClickHouse Cloud
@@ -49,7 +52,7 @@ whole trick.
 
 ## Requirements
 
-- **Docker Desktop or Docker Engine with Compose v2** — `psql` and the dashboard run in containers; nothing else is installed, and the collector needs no container because the database runs it
+- **Docker Desktop or Docker Engine with Compose v2** — `psql` and the dashboard run in containers; nothing else is installed. Ingestion needs no container at all: both schedulers are server-side
 - **A ClickHouse Cloud account** — both services live there; a new organization starts with trial credit
 - `curl`, `git`, and a browser
 
@@ -58,7 +61,7 @@ machine.
 
 > **This costs money.** Two small managed services run for about two hours.
 > On trial credit that is comfortably free; on a paid account it is small but
-> not zero. The teardown is [module 07](workshop/07-wrap-up.md) — read its
+> not zero. The teardown is [module 08](workshop/08-wrap-up.md) — read its
 > cost note before you start rather than after.
 
 ## Quick start
@@ -76,11 +79,12 @@ two services in [module 01](workshop/01-provision.md):
 ```bash
 cp .env.example .env && $EDITOR .env      # paste both sets of credentials
 
-./scripts/psql.sh -f /sql/01-schema.sql          # PostGIS schema + publication
-./scripts/psql.sh -f /sql/03-collector-in-db.sql # the database starts pulling the feed
-./scripts/psql.sh -f /sql/02-verify.sql          # is it moving?
+./scripts/psql.sh -f /sql/01-schema.sql       # PostGIS schema + publication
+# then clickhouse/01-ingest-rmv.sql in the ClickHouse SQL console
+./scripts/psql.sh -f /sql/03-postgres-sync.sql -v ch_host=... -v ch_pass=...
+./scripts/psql.sh -f /sql/02-verify.sql       # is it moving?
 
-docker compose up -d --build ui                  # http://localhost:8080
+docker compose up -d --build ui               # http://localhost:8080
 ```
 
 ## Modules
@@ -89,12 +93,13 @@ docker compose up -d --build ui                  # http://localhost:8080
 |---|---|---|---|
 | 00 | [Prerequisites](workshop/00-prerequisites.md) | 10 min | |
 | 01 | [Provision the two services](workshop/01-provision.md) | 20 min | **console** |
-| 02 | [Postgres, PostGIS and the live feed](workshop/02-postgres-and-feed.md) | 15 min | |
-| 03 | [The half that cannot move](workshop/03-spatial.md) | 15 min | |
-| 04 | [Replicate to ClickHouse](workshop/04-clickpipes.md) | 20 min | **console** |
-| 05 | [Push the counting down](workshop/05-pushdown.md) | 25 min | |
-| 06 | [The dashboard](workshop/06-dashboard.md) | 15 min | |
-| 07 | [Wrap-up and teardown](workshop/07-wrap-up.md) | 10 min | |
+| 02 | [Postgres, PostGIS and the schema](workshop/02-postgres-and-feed.md) | 10 min | |
+| 03 | [The feed, with nothing on your laptop](workshop/03-the-feed.md) | 20 min | **console** |
+| 04 | [The half that cannot move](workshop/04-spatial.md) | 15 min | |
+| 05 | [Replicate to ClickHouse](workshop/05-clickpipes.md) | 20 min | **console** |
+| 06 | [Push the counting down](workshop/06-pushdown.md) | 25 min | |
+| 07 | [The dashboard](workshop/07-dashboard.md) | 15 min | |
+| 08 | [Wrap-up and teardown](workshop/08-wrap-up.md) | 10 min | |
 
 Two modules are **console walkthroughs** rather than scripts. Creating cloud
 services and connecting a ClickPipe are tied to your own account and billing,
@@ -105,7 +110,9 @@ organization-wide API key. Everything else runs from this repository.
 
 ```text
 workshop/       the guide — also published as the documentation site
-sql/            01 schema · 02 verify · 03 the collector, in the database
+clickhouse/     01 the refreshable MV that pulls the feed (runs on ClickHouse)
+sql/            01 schema · 02 verify · 03 the Postgres side of ingestion
+                03-check  can Postgres fetch https itself? (no, and why)
                 10 spatial · 20 aggregates · 30 snapshot-to-events
                 40 pg_clickhouse FDW
 scripts/        preflight · psql (containerised) · explain-pushdown
@@ -123,10 +130,10 @@ works — over 1,500 of them, none requiring a key. The feed URL is a row in the
 database, so switching city is one statement:
 
 ```sql
-UPDATE bike.feed SET discovery_url =
+UPDATE citibike.feed SET discovery_url =
   'https://gbfs.lyft.com/gbfs/2.3/dca-cabi/gbfs.json' WHERE id = 1;
-CALL bike.discover();
-CALL bike.load_stations();
+CALL citibike.discover();
+CALL citibike.load_stations();
 ```
 
 ## Credentials
@@ -139,37 +146,38 @@ screenshot terminals during workshops.
 
 ## Verification status
 
-This repository states what has been run and what has not, because a workshop
-that overstates its own testing wastes the reader's time when it breaks.
+Every claim here was run. This section says on what.
 
-**Verified** against a live Citi Bike feed and a local PostGIS 17 container on
-2026-08-15:
+**Verified against the real products on 2026-08-15** — ClickHouse Managed
+Postgres (PostgreSQL 18.4, PostGIS 3.6.4, pg_cron 1.6, pg_clickhouse 0.3) and
+ClickHouse Cloud 26.4.1:
 
-- the GBFS discovery chain, and that the files are served from a different host than the registry lists
-- `sql/01-schema.sql`, `02-verify.sql`, `10-spatial-postgres.sql`, `20-aggregate-pushdown.sql`, `30-snapshot-to-events.sql`
-- the in-database collector end to end — `plperlu` fetching 1,073,813 bytes of live JSON over HTTPS, 2,509 stations loaded with geometry, and `pg_cron` firing every minute
-- the duplicate-snapshot skip under pg_cron — three scheduled runs produced two stored snapshots
-- the plan shape of the window query, which turned out to be index-covered rather than sorting (module 05 says so)
+- ClickHouse fetching the live GBFS feed with `url()` — 1,073,635 bytes, parsed to 2,509 stations
+- a refreshable materialized view with `REFRESH EVERY 1 MINUTE APPEND` accumulating snapshots unattended
+- `pg_clickhouse` importing the landing tables and Postgres reading them
+- `pg_cron` syncing forward every minute: **22,581 rows over 9 snapshots with five consecutive successful runs and nothing running locally**
+- the schema, the publication, and all five query files
 
-Verified on PostgreSQL 17 with PostGIS 3.6.4, plperlu 1.0 and pg_cron 1.6 — the
-same extension versions ClickHouse Managed Postgres publishes, which is why the
-in-database collector is worth trusting before you try it on a real service.
+**Verified on a local PostgreSQL 17 + PostGIS 3.6.4 container:** the container
+collector end to end, and the plan shape of the window query — which turned out
+to be index-covered rather than sorting, so module 06 makes the narrower
+argument that survives scrutiny.
+
+**A negative result, verified and kept:** Postgres cannot fetch the feed
+itself. There is no `http` or `pg_net` extension in the catalogue; `plperlu`
+installs cleanly but the server's Perl has no `IO::Socket::SSL` or
+`Net::SSLeay`, so every https fetch dies. `sql/03-check-in-db-http.sql` re-runs
+that check on your own service, because it is the image rather than a
+permission and a platform update could change it.
 
 **Written from the product documentation, not yet run end to end:** modules
-[01](workshop/01-provision.md) (provisioning), [04](workshop/04-clickpipes.md)
-(ClickPipes) and [05](workshop/05-pushdown.md) (`pg_clickhouse`), plus the
-dashboard's ClickHouse side. Those need two paid cloud services and an account,
-and the console walkthroughs describe what to look for rather than quoting
-button labels that will drift.
+[01](workshop/01-provision.md) (console provisioning),
+[05](workshop/05-clickpipes.md) (ClickPipes) and the pushdown verdicts in
+[06](workshop/06-pushdown.md). Those need a ClickPipe connected to your own
+services, and the console walkthroughs describe what to look for rather than
+quoting button labels that will drift.
 
-One dependency is genuinely unverifiable from here: whether your service will
-permit `CREATE EXTENSION plperlu`, which needs superuser, and whether its host
-carries a CA bundle Perl can find. `./scripts/preflight.sh` answers the first
-before you spend time on it, and `bike.http_get()` raises a named error rather
-than a timeout for the second. If plperlu is refused, `collector/` does the
-same pull from a container.
-
-If a step in those modules does not match what you see, that is worth an
+If a step does not match what you see, that is worth an
 [issue](https://github.com/litkhai/lightweight-workshop-ny-citi-bike/issues).
 
 ## License

@@ -1,14 +1,30 @@
-# One container: the dashboard. It reads .env from this directory automatically.
+# Both containers read .env from this directory automatically.
 #
-#   docker compose up -d --build ui     # http://localhost:8080
+#   docker compose up -d --build collector    # start the live feed
+#   docker compose logs -f collector
+#   docker compose up -d --build ui           # http://localhost:8080
 #   docker compose down
 #
-# There is deliberately no collector service here. The feed is pulled by the
-# database itself — a plperlu function on a pg_cron schedule, installed by
-# sql/03-collector-in-db.sql. Nothing has to stay running on your laptop for
-# data to keep arriving, which also means closing it does not stop collection.
+# The collector runs here rather than inside Postgres, and module 02 explains
+# why: ClickHouse Managed Postgres has no HTTP extension, and its plperlu Perl
+# has no TLS stack, so the database cannot fetch an https:// URL itself.
 
 services:
+  collector:
+    build: ./collector
+    container_name: citibike-collector
+    environment:
+      PGHOST:     ${PGHOST:?set PGHOST in .env}
+      PGPORT:     ${PGPORT:-5432}
+      PGUSER:     ${PGUSER:-postgres}
+      PGPASSWORD: ${PGPASSWORD:?set PGPASSWORD in .env}
+      PGDATABASE: ${PGDATABASE:-postgres}
+      PGSSLMODE:  ${PGSSLMODE:-require}
+      GBFS_URL:      ${GBFS_URL:-https://gbfs.citibikenyc.com/gbfs/2.3/gbfs.json}
+      GBFS_LANG:     ${GBFS_LANG:-en}
+      POLL_SECONDS:  ${POLL_SECONDS:-60}
+    restart: unless-stopped
+
   ui:
     build: ./ui
     container_name: citibike-ui
@@ -22,7 +38,7 @@ services:
       PGSSLMODE:  ${PGSSLMODE:-require}
 
       # Geometry lives here and never moves.
-      LOCAL_SCHEMA: ${LOCAL_SCHEMA:-bike}
+      LOCAL_SCHEMA: ${LOCAL_SCHEMA:-citibike}
 
       # Where sql/40-fdw-clickhouse.sql imported the foreign tables. Empty
       # until module 05. Left empty the dashboard says plainly that there is

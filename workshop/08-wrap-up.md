@@ -1,6 +1,6 @@
-# 07 — Wrap-up and teardown
+# 08 — Wrap-up and teardown
 
-**[Previous](06-dashboard.md) · [Workshop home](index.md)**
+**[Previous](07-dashboard.md) · [Workshop home](index.md)**
 
 ## What you proved
 
@@ -21,6 +21,11 @@ point is.
 **Both tables have to be replicated.** One local table in a join collapses the
 pushdown, silently, with no error and no warning.
 
+**Neither database could do the whole job alone.** Postgres has no way to
+fetch an https URL — no HTTP extension, and a Perl build with no TLS.
+ClickHouse has `url()` and a scheduler but no geometry type. The pipeline works
+because each engine does the part it can.
+
 **A fast query is not evidence.** The only honest answer to "did this push
 down?" is in the plan. You now have three ways to read it: `EXPLAIN` directly,
 `scripts/explain-pushdown.sh`, and the dashboard badge.
@@ -29,13 +34,37 @@ down?" is in the plan. You now have three ways to read it: `EXPLAIN` directly,
 
 Two paid services are running and the database is still collecting every minute.
 
-### 1. Stop collecting, and stop the dashboard
+### 1. Stop both schedulers
 
-The collector is a pg_cron job, so `docker compose down` does **not** stop it.
-Unschedule it first:
+There are **two**, and neither is on your laptop. `docker compose down` stops
+the dashboard and nothing else.
+
+On Postgres:
 
 ```bash
-./scripts/psql.sh -c "SELECT cron.unschedule('gbfs-collect')"
+./scripts/psql.sh -c "SELECT cron.unschedule('citibike-sync')"
+```
+
+On ClickHouse — in its SQL console:
+
+```sql
+DROP VIEW IF EXISTS citibike.gbfs_pull;
+DROP VIEW IF EXISTS citibike.gbfs_stations_pull;
+```
+
+Then confirm both are gone:
+
+```bash
+./scripts/psql.sh -c "SELECT jobname FROM cron.job"
+```
+
+```sql
+SELECT view, status FROM system.view_refreshes WHERE database = 'citibike';
+```
+
+Finally, the dashboard:
+
+```bash
 docker compose down
 ```
 
@@ -78,11 +107,12 @@ is the other way this gets expensive.
 
 This workshop runs two small managed services for about two hours. On trial
 credit that is comfortably free. On a paid account it is small but not zero,
-and the variable that actually matters is **how long you leave the pg_cron job
-scheduled afterwards.** Closing your laptop does not stop it — that is the
-point of an in-database collector, and also its one trap. At 3.6M rows a day
-the Postgres storage grows steadily, and every one of those rows replicates
-too.
+and the variable that actually matters is **how long you leave the two
+schedulers running afterwards.** Closing your laptop does not stop either of
+them — that is the point of a server-side pipeline, and also its one trap. At
+3.6M rows a day the ClickHouse landing table and the Postgres fact table both
+grow steadily, and every fact row replicates back a third time through
+ClickPipes.
 
 If you want to leave it running to get to the interesting data volumes, that is
 a legitimate choice. Just make it deliberately, and set a calendar reminder to
@@ -94,11 +124,11 @@ tear it down.
 aggregates and watch the verdict change. Understanding the failure mode is
 worth more than seeing the success case twice.
 
-**Try a different city.** Update `bike.feed.discovery_url` to another system from
+**Try a different city.** Update `citibike.feed.discovery_url` to another system from
 [the registry](https://github.com/MobilityData/gbfs/blob/master/systems.csv).
 Everything else works unchanged — the map re-centres itself from the data.
 
-**Leave it running for a week.** At 24M rows the timings in module 05 stop
+**Leave it running for a week.** At 24M rows the timings in module 06 stop
 being academic, and the un-indexed variants of the window query start sorting
 on disk where the covered one does not.
 

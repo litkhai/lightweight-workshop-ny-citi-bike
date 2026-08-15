@@ -6,23 +6,8 @@
 \echo '== extensions =='
 SELECT extname, extversion
 FROM pg_extension
-WHERE extname IN ('postgis', 'plperlu', 'pg_cron', 'pg_clickhouse')
+WHERE extname IN ('postgis', 'pg_clickhouse')
 ORDER BY extname;
-
-\echo ''
-\echo '== the collector, which is the database itself =='
-SELECT j.jobname, j.schedule, j.active,
-       (SELECT status FROM cron.job_run_details d
-         WHERE d.jobid = j.jobid ORDER BY runid DESC LIMIT 1) AS last_run,
-       (SELECT count(*) FROM cron.job_run_details d
-         WHERE d.jobid = j.jobid AND status = 'failed')       AS failures
-FROM cron.job j
-WHERE j.jobname = 'gbfs-collect';
-
-SELECT to_char(last_poll_at, 'HH24:MI:SS') AS last_poll,
-       last_poll_result,
-       station_status_url
-FROM bike.feed WHERE id = 1;
 
 \echo ''
 \echo '== stations (the dimension) =='
@@ -31,7 +16,7 @@ SELECT count(*)                                    AS stations,
        round(min(lat)::numeric, 3) || ' .. ' || round(max(lat)::numeric, 3) AS lat_range,
        round(min(lon)::numeric, 3) || ' .. ' || round(max(lon)::numeric, 3) AS lon_range,
        sum(capacity)                               AS total_docks
-FROM bike.stations;
+FROM citibike.stations;
 
 \echo ''
 \echo '== status (the fact table) =='
@@ -41,8 +26,8 @@ SELECT count(*)                          AS rows,
        to_char(min(polled_at), 'YYYY-MM-DD HH24:MI:SS') AS first_poll,
        to_char(max(polled_at), 'YYYY-MM-DD HH24:MI:SS') AS last_poll,
        extract(epoch FROM now() - max(polled_at))::int  AS seconds_behind,
-       pg_size_pretty(pg_total_relation_size('bike.station_status')) AS size
-FROM bike.station_status;
+       pg_size_pretty(pg_total_relation_size('citibike.station_status')) AS size
+FROM citibike.station_status;
 
 \echo ''
 \echo '== is the feed still moving? (last 10 polls) =='
@@ -50,7 +35,7 @@ SELECT to_char(polled_at, 'HH24:MI:SS') AS poll,
        count(*)                         AS stations,
        sum(num_bikes_available)         AS bikes_out_there,
        sum(num_docks_available)         AS free_docks
-FROM bike.station_status
+FROM citibike.station_status
 GROUP BY polled_at
 ORDER BY polled_at DESC
 LIMIT 10;

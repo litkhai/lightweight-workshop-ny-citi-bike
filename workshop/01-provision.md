@@ -1,6 +1,6 @@
 # 01 — Provision the two services
 
-**[Previous](00-prerequisites.md) · [Workshop home](index.md) · [Next: Postgres and the live feed](02-postgres-and-feed.md)**
+**[Previous](00-prerequisites.md) · [Workshop home](index.md) · [Next: Postgres and PostGIS](02-postgres-and-feed.md)**
 
 ## Goal
 
@@ -83,12 +83,12 @@ leaves the house; an open ingress rule turns a small mistake into a large one.
 
 !!! tip "Two things to notice while you are in here"
     Look for **`wal_level`** (or a "logical replication" toggle) and confirm it
-    is `logical`. ClickPipes in module 04 cannot replicate without it. On
+    is `logical`. ClickPipes in module 05 cannot replicate without it. On
     Managed Postgres this is usually the default — `preflight.sh` will tell you
     for certain in a moment.
 
     Also note whether the service lists **available extensions**. You need
-    `postgis` and, for module 05, `pg_clickhouse`.
+    `postgis` and, for module 06, `pg_clickhouse`.
 
 ## Step 4 — Fill in `.env`
 
@@ -97,7 +97,7 @@ cp .env.example .env
 $EDITOR .env
 ```
 
-Paste in both sets of credentials. Leave `FOREIGN_SCHEMA` empty — module 05
+Paste in both sets of credentials. Leave `FOREIGN_SCHEMA` empty — module 06
 sets it.
 
 `.env` is gitignored. This repository is public and so is yours if you fork it:
@@ -120,8 +120,8 @@ Managed Postgres
   ✓ wal_level = logical (ClickPipes can replicate)
 ```
 
-A `!` next to `pg_clickhouse` is survivable — you will get through module 04
-and stop at 05. A `✗` on the connection is not: check the IP allow-list first,
+A `!` next to `pg_clickhouse` is survivable — you will get through module 05
+and stop at 06. A `✗` on the connection is not: check the IP allow-list first,
 that is nearly always what it is.
 
 ## What you just built

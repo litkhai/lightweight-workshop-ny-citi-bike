@@ -9,14 +9,14 @@
 -- index to avoid the sort: it has to order every row in the window. At a few
 -- million rows Postgres sorts on disk and you watch it happen.
 --
---   ./scripts/psql.sh -v s=bike -f /sql/30-snapshot-to-events.sql
+--   ./scripts/psql.sh -v s=citibike -f /sql/30-snapshot-to-events.sql
 --
 -- The same query against ClickHouse is the ORDER BY the table is already
 -- stored in, which is the entire difference.
 
 \if :{?s}
 \else
-  \set s bike
+  \set s citibike
 \endif
 
 \echo ''
