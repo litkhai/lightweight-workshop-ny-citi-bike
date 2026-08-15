@@ -55,6 +55,23 @@ someone reaches module 06 and only ever gets `dragged`, this is why. Consider
 letting one person make the mistake deliberately; the counter-example teaches
 better than the warning does.
 
+## Use the dashboard as the teaching surface
+
+Two tabs in module 07 are worth more than the module's own page suggests.
+
+**Checks** is the fastest way to unblock a room. Instead of debugging one
+laptop's psql output on a projector, have everyone open `#checks` and read out
+which line is red — it names the file to re-run. It also gives you a way to see
+who is behind without asking.
+
+**Lab** is where to spend any time you have left. Have the room run exercises 5
+and 6 back to back: same query shape, one changed `ORDER BY`, and a `Sort` node
+appears in the plan tree. That pair makes the argument for moving analytical
+work far better than any timing does at workshop data volumes, and it is honest
+in a way "ClickHouse is faster" is not. Then exercise 3, which breaks the
+pushdown on purpose — the verdict flipping while nothing errors is the moment
+people remember.
+
 ## Discussion prompts that work
 
 **After module 04:** "What would you have to give up to put all of this in one

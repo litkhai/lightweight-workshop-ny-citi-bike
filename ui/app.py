@@ -86,7 +86,7 @@ def dsn():
             f"options='-c statement_timeout={STATEMENT_TIMEOUT_MS}'")
 
 
-def connect():
+def connect(read_only=False):
     """A client-side-binding cursor, chosen deliberately.
 
     Two reasons, and the second is the one that matters here. First, the SQL
@@ -94,8 +94,17 @@ def connect():
     with $1 in it. Second, a parameterised query reaches a foreign table as a
     generic plan with placeholders, and a wrapper that cannot see the constants
     has less to push down — literals give it a WHERE clause to work with.
+
+    `read_only` is for the SQL lab, where the text comes from whoever has the
+    page open. Postgres refusing the write is a much better guarantee than any
+    keyword blocklist here would be: it covers the statements nobody thought to
+    ban, and it covers them inside functions and CTEs too. It has to be set
+    before the first statement opens a transaction.
     """
-    return psycopg.connect(dsn(), cursor_factory=ClientCursor)
+    conn = psycopg.connect(dsn(), cursor_factory=ClientCursor)
+    if read_only:
+        conn.read_only = True
+    return conn
 
 
 # --------------------------------------------------------------------------- #
@@ -356,6 +365,251 @@ GROUP BY 1 ORDER BY 1 DESC LIMIT 48"""},
 }
 
 
+# --------------------------------------------------------------------------- #
+# The lab. Everything above answers a question the page chose; everything below
+# lets the reader ask their own, which is the difference between a demo and an
+# exercise.
+#
+# `{S}` is the schema under test and `{L}` is always local, so the same text can
+# be sent to either side — or to both at once, which is the only way to see that
+# identical SQL produces two different plans.
+# --------------------------------------------------------------------------- #
+
+EXERCISES = {
+    "count": {
+        "label": "1 · The simplest pushdown",
+        "goal": "Get a verdict of ClickHouse, and understand why this shape is the easy case.",
+        "look_for": "Remote SQL should contain count(). One row comes back; nothing else crosses.",
+        "side": "both",
+        "sql": "SELECT count(*) AS snapshots FROM {S}.station_status",
+    },
+    "working_join": {
+        "label": "2 · A join that stays remote",
+        "goal": "Both tables are replicated, so the join is remote work too.",
+        "look_for": "Remote SQL carries the JOIN and the GROUP BY. Rows crossed should be tiny.",
+        "side": "both",
+        "sql": """SELECT st.name, count(*) AS observations,
+       round(avg(ss.num_bikes_available), 1) AS avg_bikes
+FROM {S}.station_status ss
+JOIN {S}.stations st ON st.station_key = ss.station_key
+GROUP BY st.name
+ORDER BY observations DESC
+LIMIT 10""",
+    },
+    "broken_join": {
+        "label": "3 · Break it on purpose",
+        "goal": "One local table in the join collapses the pushdown — silently, with no error.",
+        "look_for": "Verdict flips to Postgres. Compare 'rows crossed' with exercise 2: every "
+                    "status row now comes back to be joined here.",
+        "side": "foreign",
+        "sql": """-- station_status is remote, stations is forced local with {L}.
+-- This is the single most common way a working pushdown stops working.
+SELECT st.name, count(*) AS observations,
+       round(avg(ss.num_bikes_available), 1) AS avg_bikes
+FROM {S}.station_status ss
+JOIN {L}.stations st ON st.station_key = ss.station_key
+GROUP BY st.name
+ORDER BY observations DESC
+LIMIT 10""",
+    },
+    "geometry": {
+        "label": "4 · Geometry cannot cross",
+        "goal": "Ask for a spatial predicate over the remote table and watch what has to happen.",
+        "look_for": "ST_DWithin needs geom, which only exists locally — so the aggregate cannot "
+                    "go remote no matter how simple it looks.",
+        "side": "foreign",
+        "sql": """-- Everything within 500 m of Grand Army Plaza.
+SELECT count(*) AS observations,
+       round(avg(ss.num_bikes_available), 1) AS avg_bikes
+FROM {S}.station_status ss
+JOIN {L}.stations st ON st.station_key = ss.station_key
+WHERE ST_DWithin(st.geom::geography,
+                 ST_SetSRID(ST_MakePoint(-73.9699, 40.6743), 4326)::geography,
+                 500)""",
+    },
+    "window_covered": {
+        "label": "5 · The window function that does not sort",
+        "goal": "The surprise: with the module-02 index, Postgres reads straight down it.",
+        "look_for": "In the plan tree, an Index Scan on status_station_time_ix and NO Sort node. "
+                    "This is Postgres doing well.",
+        "side": "local",
+        "sql": """SELECT station_key, polled_at, num_bikes_available,
+       num_bikes_available - lag(num_bikes_available)
+           OVER (PARTITION BY station_key ORDER BY polled_at) AS delta
+FROM {S}.station_status
+ORDER BY station_key, polled_at
+LIMIT 200""",
+    },
+    "window_uncovered": {
+        "label": "6 · Now uncover the index",
+        "goal": "Change the ordering and the same query has to sort. This is the honest argument.",
+        "look_for": "A Sort node appears. You can index for one access path, not for all of them "
+                    "— and the second question you ask is never the one you indexed for.",
+        "side": "local",
+        "sql": """-- Identical shape to exercise 5, ordered by a column the index does not carry.
+SELECT station_key, num_bikes_available,
+       num_bikes_available - lag(num_bikes_available)
+           OVER (PARTITION BY station_key ORDER BY num_bikes_available) AS delta
+FROM {S}.station_status
+LIMIT 200""",
+    },
+    "your_own": {
+        "label": "7 · Your own query",
+        "goal": "Write anything. The transaction is read only, so you cannot break the workshop.",
+        "look_for": "Whatever you were curious about. Run it on both sides and compare the plans.",
+        "side": "both",
+        "sql": """SELECT date_trunc('hour', polled_at) AS hour,
+       count(*)                        AS observations,
+       sum(num_bikes_available)        AS bikes,
+       sum(num_ebikes_available)       AS ebikes
+FROM {S}.station_status
+GROUP BY 1
+ORDER BY 1 DESC
+LIMIT 24""",
+    },
+}
+
+# How many result rows reach the browser. The plan is the lesson here; a lab
+# query that accidentally selects a million rows should not also freeze the tab.
+LAB_ROW_CAP = 500
+
+
+def run_one(cur, sql, fdw_ready):
+    """EXPLAIN it, run it, and return everything needed to argue about it."""
+    try:
+        cur.execute("EXPLAIN (VERBOSE, COSTS ON, FORMAT JSON) " + sql)
+    except psycopg.errors.SyntaxError as exc:
+        # EXPLAIN accepts SELECT/INSERT/UPDATE/DELETE and nothing else, so DDL
+        # lands here with a caret pointing at text the reader never typed.
+        # Saying what the lab is for beats leaking the prefix.
+        raise ValueError(
+            "this is not a query the lab can plan — EXPLAIN takes SELECT and "
+            f"the DML statements only, and the transaction is read only in any "
+            f"case ({str(exc).splitlines()[0]})") from None
+    ran = analyse(cur.fetchone()[0], fdw_ready)
+    t0 = time.perf_counter()
+    cur.execute(sql)
+    cols = [c.name for c in cur.description] if cur.description else []
+    fetched = cur.fetchmany(LAB_ROW_CAP) if cur.description else []
+    ms = round((time.perf_counter() - t0) * 1000, 1)
+    rows = [[str(v) if v is not None else "" for v in r] for r in fetched]
+    return {"schema_sql": sql, "columns": cols, "rows": rows, "ms": ms,
+            "truncated": len(rows) >= LAB_ROW_CAP, "ran": ran}
+
+
+# --------------------------------------------------------------------------- #
+# Checkpoints. One per thing a module was supposed to leave behind, so a reader
+# who is stuck can see which step did not take rather than guessing.
+# --------------------------------------------------------------------------- #
+
+def checks(cur, state):
+    out = []
+
+    def check(module, label, fn, hint):
+        """Each check gets a savepoint.
+
+        Without one the first failure aborts the transaction and every check
+        after it reports "current transaction is aborted" instead of its own
+        result — which is precisely backwards, because the checks that fail are
+        the ones a reader opened this tab to read. Half these queries touch
+        objects that legitimately do not exist yet (cron.job before module 03,
+        the ingest schema before the FDW), so failure is the normal case here,
+        not the exception.
+        """
+        try:
+            cur.execute("SAVEPOINT chk")
+            ok, detail = fn()
+            cur.execute("RELEASE SAVEPOINT chk")
+        except Exception as exc:                                   # noqa: BLE001
+            try:
+                cur.execute("ROLLBACK TO SAVEPOINT chk")
+            except Exception:                                      # noqa: BLE001
+                pass
+            # First line only: the LINE/caret block underneath is noise in a
+            # one-line status row.
+            ok = False
+            detail = f"{type(exc).__name__}: {str(exc).splitlines()[0]}"
+        out.append({"module": module, "label": label, "ok": bool(ok),
+                    "detail": detail, "hint": "" if ok else hint})
+
+    def scalar(sql):
+        cur.execute(sql)
+        return cur.fetchone()
+
+    check("02", "PostGIS is installed",
+          lambda: (lambda v: (bool(v[0]), f"postgis {v[0]}" if v[0] else "not installed"))(
+              scalar("SELECT (SELECT extversion FROM pg_extension WHERE extname='postgis')")),
+          "Run sql/01-schema.sql.")
+
+    check("02", "Both tables exist",
+          lambda: (lambda v: (v[0] == 2, f"{v[0]} of 2 found"))(
+              scalar(f"""SELECT count(*) FROM pg_class c
+                           JOIN pg_namespace n ON n.oid = c.relnamespace
+                          WHERE n.nspname = '{LOCAL_SCHEMA}'
+                            AND c.relname IN ('stations','station_status')""")),
+          "Run sql/01-schema.sql.")
+
+    check("02", "Publication names two tables",
+          lambda: (lambda v: (v[0] == 2, f"{v[0]} table(s) published"))(
+              scalar("SELECT count(*) FROM pg_publication_tables WHERE pubname='citibike_pub'")),
+          "Run sql/01-schema.sql. ClickPipes needs this in module 05.")
+
+    check("03", "pg_cron job is scheduled and active",
+          lambda: (lambda v: (bool(v[0]), v[1] or "no citibike-sync job"))(
+              scalar("""SELECT (SELECT active FROM cron.job WHERE jobname='citibike-sync'),
+                               (SELECT jobname || ' · ' || schedule FROM cron.job
+                                 WHERE jobname='citibike-sync')""")),
+          "Run sql/03-postgres-sync.sql.")
+
+    check("03", "Its last run succeeded",
+          lambda: (lambda v: (v[0] == 'succeeded', f"{v[0] or 'never run'}"
+                              + (f" at {v[1]}" if v[1] else "")))(
+              scalar("""SELECT status, to_char(start_time,'HH24:MI:SS') FROM cron.job_run_details
+                         WHERE jobname='citibike-sync' ORDER BY runid DESC LIMIT 1""")),
+          "Look at return_message in cron.job_run_details — usually the FDW credentials.")
+
+    check("03", "ClickHouse landing tables are reachable",
+          lambda: (lambda v: (v[0] == 2, f"{v[0]} of 2 foreign tables in citibike_ingest"))(
+              scalar("""SELECT count(*) FROM information_schema.foreign_tables
+                         WHERE foreign_table_schema='citibike_ingest'""")),
+          "Run clickhouse/01-ingest-rmv.sql first, then sql/03-postgres-sync.sql.")
+
+    check("03", "Data is arriving",
+          lambda: (lambda v: (v[0] is not None and v[0] < 300,
+                              "no rows yet" if v[0] is None
+                              else f"newest snapshot {v[0]}s old ({v[1]} rows)"))(
+              scalar(f"""SELECT extract(epoch FROM now()-max(polled_at))::int, count(*)
+                           FROM {LOCAL_SCHEMA}.station_status""")),
+          "Up to 2 minutes is normal — one schedule for the MV, one for pg_cron. "
+          "Longer than that, check the two above.")
+
+    check("05", "A replication slot is active",
+          lambda: (lambda v: (v[0] is True, "active" if v[0] else
+                              ("slot exists but is INACTIVE — it is retaining WAL"
+                               if v[0] is False else "no slot")))(
+              scalar("SELECT (SELECT active FROM pg_replication_slots LIMIT 1)")),
+          "Create the ClickPipe in module 05. An inactive slot is worse than none: "
+          "it retains WAL forever.")
+
+    check("06", "Foreign tables imported for the pushdown",
+          lambda: (state["ready"],
+                   f"{state['foreign_tables']} foreign table(s) in "
+                   f"{state['foreign_schemas'] or '(none)'}"
+                   + ("" if FOREIGN_SCHEMA else "; FOREIGN_SCHEMA is not set")),
+          "Run sql/40-fdw-clickhouse.sql, then set FOREIGN_SCHEMA in .env and "
+          "restart the dashboard.")
+
+    with LOG_LOCK:
+        pushed = [e for e in LOG if e["where"] == "clickhouse"]
+    check("06", "A pushdown has been observed in this session",
+          lambda: (bool(pushed),
+                   f"{len(pushed)} query/queries verdicted ClickHouse"
+                   if pushed else "none yet"),
+          "Open the Lab tab and run exercise 1 against ClickHouse.")
+
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -388,6 +642,16 @@ class Handler(BaseHTTPRequestHandler):
                     "fdw": state}))
             if path == "/api/overview":
                 return self._overview()
+            if path == "/api/checks":
+                with connect() as conn, conn.cursor() as cur:
+                    state = fdw_state(cur)
+                    return self._send(200, json.dumps(
+                        {"checks": checks(cur, state), "fdw": state}))
+            if path == "/api/exercises":
+                return self._send(200, json.dumps({
+                    "exercises": [dict(v, key=k) for k, v in EXERCISES.items()],
+                    "local_schema": LOCAL_SCHEMA,
+                    "foreign_schema": FOREIGN_SCHEMA}))
             if path == "/api/log":
                 return self._log()
             if path.startswith("/api/map/"):
@@ -399,12 +663,70 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:                                  # noqa: BLE001
             self._send(500, json.dumps({"error": f"{type(exc).__name__}: {exc}"}))
 
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if parsed.path == "/api/run":
+                return self._run(body.get("sql", ""), body.get("side", "both"))
+            self._send(404, json.dumps({"error": "not found"}))
+        except Exception as exc:                                  # noqa: BLE001
+            self._send(500, json.dumps({"error": f"{type(exc).__name__}: {exc}"}))
+
+    def _run(self, sql, side):
+        """The lab. Arbitrary SQL, read only, on either side or on both.
+
+        Running the same text against both schemas in one request is the point:
+        two verdicts and two timings from one query is an argument, where either
+        one on its own is just a number.
+        """
+        sql = (sql or "").strip().rstrip(";").strip()
+        if not sql:
+            return self._send(400, json.dumps({"error": "nothing to run"}))
+
+        results = []
+        with QUERY_SLOT, connect(read_only=True) as conn, conn.cursor() as cur:
+            state = fdw_state(cur)
+            wanted = (["local", "foreign"] if side == "both" else [side])
+            for which in wanted:
+                if which == "foreign" and not state["ready"]:
+                    continue
+                schema = FOREIGN_SCHEMA if which == "foreign" else LOCAL_SCHEMA
+                text = sql.replace("{S}", schema).replace("{L}", LOCAL_SCHEMA)
+                try:
+                    r = run_one(cur, text, state["ready"])
+                except Exception as exc:                           # noqa: BLE001
+                    # One side failing is itself a result — exercise 4 is
+                    # supposed to be refused by ClickHouse, and seeing the error
+                    # next to the working side is the lesson.
+                    conn.rollback()
+                    results.append({"side": which, "schema": schema, "sql": text,
+                                    "error": f"{type(exc).__name__}: {exc}"})
+                    continue
+                record("lab", side if side != "both" else which,
+                       r["ran"], r["ms"], len(r["rows"]), text, schema)
+                results.append(dict(r, side=which, schema=schema, sql=text))
+
+        if not results:
+            return self._send(400, json.dumps({
+                "error": "no foreign tables are configured, so there is no "
+                         "ClickHouse side to run against yet"}))
+        self._send(200, json.dumps({"results": results, "fdw": state}))
+
     def _overview(self):
         """Live state of both halves. Index work, so this is safe to poll."""
         with connect() as conn, conn.cursor() as cur:
+            # reltuples is -1, not 0, until the first ANALYZE — so a table that
+            # has only just started filling reports a negative row count. Fall
+            # back to an exact count in that window; it is cheap precisely
+            # because there is not much there yet.
             cur.execute(f"""
                 SELECT (SELECT count(*) FROM {LOCAL_SCHEMA}.stations),
-                       (SELECT reltuples::bigint FROM pg_class
+                       (SELECT CASE WHEN reltuples < 0
+                                    THEN (SELECT count(*) FROM {LOCAL_SCHEMA}.station_status)
+                                    ELSE reltuples::bigint END
+                          FROM pg_class
                          WHERE oid = '{LOCAL_SCHEMA}.station_status'::regclass),
                        pg_size_pretty(pg_total_relation_size('{LOCAL_SCHEMA}.station_status')),
                        (SELECT to_char(max(polled_at), 'YYYY-MM-DD HH24:MI:SS')
@@ -437,7 +759,38 @@ class Handler(BaseHTTPRequestHandler):
             (cdc_state, slot_active, unconsumed, published) = cur.fetchone()
             state = fdw_state(cur)
 
+            # Pillar three, made visible. The two schedulers are the only part
+            # of the pipeline with nothing on your laptop to look at, so if the
+            # page does not report them there is nowhere to look at all.
+            pipeline = {"cron": "no job", "cron_last": "-", "cron_failures": None,
+                        "landing_newest": None, "landing_lag": None}
+            try:
+                cur.execute("""
+                    SELECT coalesce((SELECT jobname || ' · ' || schedule FROM cron.job
+                                      WHERE jobname = 'citibike-sync'), 'no job'),
+                           coalesce((SELECT status || ' at ' || to_char(start_time,'HH24:MI:SS')
+                                       FROM cron.job_run_details WHERE jobname = 'citibike-sync'
+                                      ORDER BY runid DESC LIMIT 1), '-'),
+                           (SELECT count(*) FROM cron.job_run_details
+                             WHERE jobname = 'citibike-sync' AND status <> 'succeeded')""")
+                pipeline["cron"], pipeline["cron_last"], pipeline["cron_failures"] = cur.fetchone()
+            except Exception:                                      # noqa: BLE001
+                conn.rollback()
+
+            # How far behind ClickHouse's landing table Postgres is. This is the
+            # pg_cron half of the lag on its own, which is the number people
+            # actually want when they ask why the dashboard is two minutes old.
+            try:
+                cur.execute("""
+                    SELECT to_char(max(polled_at), 'HH24:MI:SS'),
+                           extract(epoch FROM now() - max(polled_at))::int
+                      FROM citibike_ingest.gbfs_status""")
+                pipeline["landing_newest"], pipeline["landing_lag"] = cur.fetchone()
+            except Exception:                                      # noqa: BLE001
+                conn.rollback()
+
         self._send(200, json.dumps({
+            "pipeline": pipeline,
             "postgres": {"version": pgver, "postgis": gisver, "stations": stations,
                          "rows_estimate": rows_est, "size": size,
                          "last_poll": last_poll, "behind_seconds": behind},

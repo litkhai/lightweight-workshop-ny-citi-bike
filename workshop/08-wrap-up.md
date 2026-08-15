@@ -27,8 +27,9 @@ ClickHouse has `url()` and a scheduler but no geometry type. The pipeline works
 because each engine does the part it can.
 
 **A fast query is not evidence.** The only honest answer to "did this push
-down?" is in the plan. You now have three ways to read it: `EXPLAIN` directly,
-`scripts/explain-pushdown.sh`, and the dashboard badge.
+down?" is in the plan. You now have four ways to read it: `EXPLAIN` directly,
+`scripts/explain-pushdown.sh`, the dashboard badge, and the dashboard's Lab tab
+running one query against both engines at once.
 
 ## Teardown — read this part
 
@@ -120,9 +121,9 @@ tear it down.
 
 ## Where to go next
 
-**Make the pushdown fail on purpose.** Add `ST_Distance` to one of the
-aggregates and watch the verdict change. Understanding the failure mode is
-worth more than seeing the success case twice.
+**Make the pushdown fail on purpose.** Exercises 3 and 4 in the dashboard's Lab
+tab do exactly this, and exercise 7 is a blank page for your own. Understanding
+the failure mode is worth more than seeing the success case twice.
 
 **Try a different city.** Point the two `url()` calls in
 `clickhouse/01-ingest-rmv.sql` at another system from

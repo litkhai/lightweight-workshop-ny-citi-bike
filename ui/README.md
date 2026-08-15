@@ -26,13 +26,46 @@ thing this page could do.
 | Endpoint | Returns |
 |---|---|
 | `GET /api/catalog` | Query list and current FDW state |
-| `GET /api/overview` | Both halves: counts, size, lag, replication slot, FDW. Index work, safe to poll |
+| `GET /api/overview` | Both halves: counts, size, lag, both schedulers, replication slot, FDW. Index work, safe to poll |
 | `GET /api/map/<name>` | GeoJSON from PostGIS: `stations`, `voronoi`, `pressure` |
 | `GET /api/agg/<name>` | One aggregate: `hourly`, `busiest`, `stranded`, `electric`. `?side=auto\|local\|foreign` |
+| `GET /api/exercises` | The lab's preset exercises |
+| `GET /api/checks` | One pass/fail checkpoint per thing a module should have left behind |
+| `POST /api/run` | `{sql, side}` — arbitrary SQL, read only. `side` is `local`, `foreign` or `both` |
 | `GET /api/log` | The session ring buffer and its totals |
 
-Every query response carries the SQL that ran, the elapsed time, and the
-verdict.
+Every query response carries the SQL that ran, the elapsed time, the annotated
+plan tree, and the verdict.
+
+The tab is in the URL hash — `#over`, `#maps`, `#stats`, `#lab`, `#checks`,
+`#log` — so a module can link straight at one.
+
+## The lab
+
+`POST /api/run` is what makes this an exercise rather than a demo. Two things
+make it safe enough to hand to a room:
+
+**The transaction is read only**, set on the connection before the first
+statement. Postgres refusing the write is a far better guarantee than a keyword
+blocklist would be — it covers the statements nobody thought to ban, and it
+covers them inside CTEs and functions too. DDL never gets that far, because
+`EXPLAIN` only accepts `SELECT` and the DML statements.
+
+**`{S}` and `{L}` are substituted, not the schema name.** `{S}` is the schema
+under test and `{L}` is always local, so one query text can be sent to both
+sides in a single request and come back with two plans and two timings. That
+comparison is the whole lesson; either side alone is just a number.
+
+Results are capped at 500 rows on the way to the browser. The plan is the point.
+
+## Checks
+
+`GET /api/checks` runs each checkpoint **inside its own savepoint**. Without
+that, the first failure aborts the transaction and every later check reports
+"current transaction is aborted" instead of its own result — exactly backwards,
+since the failing checks are the ones a reader opened the tab to see. Half of
+them touch objects that legitimately do not exist yet (`cron.job` before module
+03, `citibike_ingest` before the FDW), so failure is the normal case here.
 
 ## The verdict
 
@@ -77,8 +110,8 @@ only closes the connection, and Postgres keeps executing.
 ## Deliberately not production
 
 - The log is a 300-entry in-memory ring buffer. A demo aid, not an audit trail.
-- No authentication. Read-only queries against your workshop database — keep it on localhost.
-- MapLibre GL JS loads from `unpkg.com`, so the map needs internet. Everything else works against the database alone.
+- **No authentication, and the Lab runs SQL you send it.** The transaction is read only, but anyone who can reach the port can read your workshop data. Keep it on localhost.
+- MapLibre GL JS loads from `unpkg.com` and needs WebGL. If either is unavailable — a proxy that blocks the CDN, a VM without WebGL — the Maps tab says so and every other tab is unaffected. That containment is deliberate: the `Map` constructor throwing used to take the rest of the page down with it.
 
 ## License
 
