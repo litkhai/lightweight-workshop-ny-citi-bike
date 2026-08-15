@@ -10,10 +10,10 @@ Have everything installed and verified before you create anything that bills.
 
 | | Why |
 |---|---|
-| **Docker Desktop / Engine with Compose v2** | `psql` and the dashboard run in containers. Nothing gets installed on your machine — and the collector needs no container at all, because the database runs it |
+| **Docker Desktop / Engine with Compose v2** | `psql` and the dashboard run in containers, so nothing gets installed on your machine. Docker plays no part in ingestion — both schedulers are server-side |
 | **A ClickHouse Cloud account** | Both services live here. A new account starts with trial credit |
 | **`curl` and `git`** | Fetching the repo and probing the feed |
-| **A browser** | Two modules are console work |
+| **A browser** | Three modules are console work |
 
 No Postgres client, no Python, no ClickHouse client. If `docker` runs, you are
 equipped.
@@ -71,22 +71,23 @@ Nothing in this workshop is New York-specific except the map's initial centre.
 Any **docked** system works — dockless scooter feeds have no stations to join
 to, so they will not do.
 
-The feed URL lives in the database, not in a config file. After module 02 you
-change it with one statement:
+ClickHouse is what fetches the feed, so the URL lives in the two `url()` calls
+in `clickhouse/01-ingest-rmv.sql`. Swap them in [module 03](03-the-feed.md) and
+everything downstream works unchanged.
 
-```sql
--- Capital Bikeshare, Washington DC — 860 stations
-UPDATE citibike.feed SET discovery_url =
-  'https://gbfs.lyft.com/gbfs/2.3/dca-cabi/gbfs.json' WHERE id = 1;
-CALL citibike.discover();
-CALL citibike.load_stations();
-```
-
-!!! note "Always start from the discovery URL, never a data file"
+!!! note "Resolve the discovery document; never copy a data URL from a blog post"
     The host serving the JSON is frequently not the one in the registry. Citi
     Bike registers `gbfs.citibikenyc.com` and serves from `gbfs.lyft.com`. The
-    `citibike.discover()` follows the chain properly; if you hardcode a URL from a
-    blog post, you will be reading a stale mirror.
+    registry entry is a *discovery* document that points at the real files:
+
+    ```bash
+    # Capital Bikeshare, Washington DC — 860 stations
+    curl -s https://gbfs.lyft.com/gbfs/2.3/dca-cabi/gbfs.json | python3 -m json.tool
+    ```
+
+    Take `station_information` and `station_status` out of that and paste them
+    into the materialized views. A URL from a blog post is very often a stale
+    mirror.
 
 ## Next
 

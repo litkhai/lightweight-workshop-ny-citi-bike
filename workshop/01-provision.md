@@ -88,17 +88,22 @@ leaves the house; an open ingress rule turns a small mistake into a large one.
     for certain in a moment.
 
     Also note whether the service lists **available extensions**. You need
-    `postgis` and, for module 06, `pg_clickhouse`.
+    `postgis`, `pg_cron` and `pg_clickhouse` — the last two from module 03
+    onward, because they are how the data arrives.
 
-## Step 4 — Fill in `.env`
+## Step 4 — Record the credentials
 
 ```bash
-cp .env.example .env
-$EDITOR .env
+./setup.sh
 ```
 
-Paste in both sets of credentials. Leave `FOREIGN_SCHEMA` empty — module 06
-sets it.
+It asks for the two sets of values you just collected and writes `.env` with
+mode `600`. Nothing is sent anywhere. `FOREIGN_SCHEMA` is left empty on purpose
+— module 06 sets it.
+
+Both services are required from here on. It is tempting to skip the ClickHouse
+half because "the Postgres part comes first", but **ClickHouse is what fetches
+the feed** in module 03, so an empty `CH_HOST` means no data at all.
 
 `.env` is gitignored. This repository is public and so is yours if you fork it:
 never commit this file.
@@ -109,20 +114,26 @@ never commit this file.
 ./scripts/preflight.sh
 ```
 
-Now that `.env` exists, the last section should fill in:
+Now that `.env` exists, the last two sections should fill in:
 
 ```text
 Managed Postgres
   ✓ .env present
   ✓ connected — PostgreSQL 18.x
   ✓ postgis is available
+  ✓ pg_cron is available
   ✓ pg_clickhouse is available
   ✓ wal_level = logical (ClickPipes can replicate)
+
+ClickHouse Cloud
+  ✓ CH_HOST and CH_PASSWORD are set
+  ✓ HTTPS interface answered SELECT 1
 ```
 
-A `!` next to `pg_clickhouse` is survivable — you will get through module 05
-and stop at 06. A `✗` on the connection is not: check the IP allow-list first,
-that is nearly always what it is.
+A `✗` on either connection is worth fixing before you go on, and for Postgres it
+is nearly always the IP allow-list. `pg_cron` and `pg_clickhouse` are both hard
+requirements rather than niceties: together they are the ingestion path in
+module 03, not just the pushdown in module 06.
 
 ## What you just built
 
@@ -131,4 +142,4 @@ from your laptop. Nothing is replicating yet and nothing is collecting yet.
 
 ## Next
 
-[02 — Postgres, PostGIS and the live feed](02-postgres-and-feed.md)
+[02 — Postgres, PostGIS and the schema](02-postgres-and-feed.md)

@@ -21,7 +21,10 @@ the **execution plan**, not out of a stopwatch.
 
 ```text
 Citi Bike GBFS            public JSON, no API key, ~2,500 stations, refreshed every 60s
-      │  pulled by the database itself — plperlu + pg_cron, no container
+      │  ClickHouse refreshable MV over url(), every minute
+      ▼
+ClickHouse Cloud   citibike.gbfs_status          ← landing
+      │  pg_clickhouse foreign table + pg_cron, every minute
       ▼
 ClickHouse Managed Postgres
       citibike.stations        PostGIS points  · 2,500 rows  · barely changes
@@ -51,16 +54,21 @@ and the two steps that cannot be rushed.
 
 ## Honest scope
 
-Two of the steps in this workshop **cannot be scripted**, and this is by
+Three of the steps in this workshop **cannot be scripted**, and this is by
 design rather than laziness: creating cloud services and connecting a ClickPipe
-are console actions tied to your own account and billing. Those modules are
-written as click-through walkthroughs.
+are console actions tied to your own account and billing, and the refreshable
+materialized views that fetch the feed are ClickHouse statements that do not go
+through `psql`. Those modules are written as click-through walkthroughs.
 
-Everything else — schema, live collection, queries, dashboard — runs from this
+Everything else — schema, ingestion, queries, dashboard — runs from this
 repository with Docker and nothing else installed.
 
 !!! warning "This costs money"
     Two paid cloud services run for the duration. Both are small, and the
     workshop uses trial-sized instances, but they are not free. Module
-    [07 — Wrap-up](08-wrap-up.md) has the teardown, and you should read the
+    [08 — Wrap-up](08-wrap-up.md) has the teardown, and you should read the
     cost note there **before** you start rather than after.
+
+    Note especially that **closing your laptop does not stop collection.** Both
+    schedulers are server-side; that is the point of the design and also its
+    one trap.

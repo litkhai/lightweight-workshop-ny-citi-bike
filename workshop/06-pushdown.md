@@ -179,4 +179,4 @@ FOREIGN_SCHEMA=citibike_ch
 
 ## Next
 
-[06 — The dashboard](07-dashboard.md)
+[07 — The dashboard](07-dashboard.md)

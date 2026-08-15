@@ -10,7 +10,7 @@ bundle). The image is `python:3.12-slim` with `psycopg[binary]`.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `LOCAL_SCHEMA` | `bike` | Where the geometry lives. Maps always read this |
+| `LOCAL_SCHEMA` | `citibike` | Where the geometry lives. Maps always read this |
 | `FOREIGN_SCHEMA` | *(empty)* | Where `sql/40-fdw-clickhouse.sql` imported the foreign tables. Set it and Statistics gains a side switch |
 | `UI_PORT` | `8080` | Listen port |
 | `STATEMENT_TIMEOUT_MS` | `120000` | Server-side ceiling on any one query |

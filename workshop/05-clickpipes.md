@@ -95,7 +95,13 @@ Leave the sync mode at the default (initial snapshot, then continuous CDC).
 ## Step 4 — Destination
 
 Target database `default` and keep the table names as they are: `stations` and
-`station_status`. Module 05's `IMPORT FOREIGN SCHEMA` expects those names.
+`station_status`. Module 06's `IMPORT FOREIGN SCHEMA` expects those names.
+
+!!! note "`default`, not `citibike`"
+    Module 03 created a `citibike` database on this same ClickHouse service for
+    the landing tables. The CDC mirror is a different thing and goes in
+    `default`. Keeping them apart is what lets you tell, later, whether a row
+    arrived by `url()` or by replication.
 
 If the connector offers an engine choice, `ReplacingMergeTree` keyed on the
 primary key is the sensible default for CDC — it is how updates and deletes
@@ -162,4 +168,4 @@ Put that query in whatever you monitor, and see
 
 ## Next
 
-[05 — Push the counting down](06-pushdown.md)
+[06 — Push the counting down](06-pushdown.md)

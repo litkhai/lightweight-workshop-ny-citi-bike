@@ -1,10 +1,11 @@
--- Could the collector live inside the database?
+-- Could Postgres fetch the feed itself?
 --
 --   ./scripts/psql.sh -f /sql/03-check-in-db-http.sql
 --
--- On ClickHouse Managed Postgres today the answer is no, and this file exists
--- so you can confirm that for yourself rather than taking module 02's word for
--- it — and so you can re-check after a platform update.
+-- On ClickHouse Managed Postgres today the answer is no, which is why module 03
+-- has ClickHouse do the fetching. This file exists so you can confirm that on
+-- your own service rather than taking the module's word for it — and so you can
+-- re-check after a platform update.
 --
 -- Running it changes nothing except creating one diagnostic function.
 
@@ -15,7 +16,7 @@ WHERE name IN ('http', 'pg_net', 'plpython3u', 'plperlu', 'pg_cron')
 ORDER BY name;
 
 \echo ''
-\echo '-- http / pg_net / plpython3u absent means plperlu is the only way out.'
+\echo '-- http / pg_net / plpython3u absent means plperlu is the only candidate.'
 \echo ''
 
 \echo '== can this role install an untrusted language? =='

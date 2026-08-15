@@ -124,9 +124,11 @@ tear it down.
 aggregates and watch the verdict change. Understanding the failure mode is
 worth more than seeing the success case twice.
 
-**Try a different city.** Update `citibike.feed.discovery_url` to another system from
-[the registry](https://github.com/MobilityData/gbfs/blob/master/systems.csv).
-Everything else works unchanged — the map re-centres itself from the data.
+**Try a different city.** Point the two `url()` calls in
+`clickhouse/01-ingest-rmv.sql` at another system from
+[the registry](https://github.com/MobilityData/gbfs/blob/master/systems.csv) and
+re-run the file. Everything else works unchanged — the map re-centres itself
+from the data.
 
 **Leave it running for a week.** At 24M rows the timings in module 06 stop
 being academic, and the un-indexed variants of the window query start sorting

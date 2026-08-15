@@ -19,6 +19,9 @@ command -v curl >/dev/null && ok "curl" || bad "curl not found"
 
 echo
 echo "The data feed (public, no key)"
+# A liveness probe from your laptop, not configuration. The workshop's real
+# fetch is ClickHouse's, and its URL lives in clickhouse/01-ingest-rmv.sql.
+# Override here only to check a different city before you commit to it.
 GBFS_URL="${GBFS_URL:-https://gbfs.citibikenyc.com/gbfs/2.3/gbfs.json}"
 if disco=$(curl -fsS --max-time 20 "$GBFS_URL" 2>/dev/null); then
     ok "auto-discovery reachable"
@@ -51,33 +54,44 @@ if [ -f "$LAB_DIR/.env" ]; then
             "SELECT count(*) FROM pg_available_extensions WHERE name='postgis'" 2>/dev/null)
         [ "$pg" = "1" ] && ok "postgis is available" || bad "postgis not available"
 
-        # The collector runs inside the database, so these two are not
-        # optional niceties — without them there is nothing to collect with.
-        pl=$(psql_run -tAc \
-            "SELECT count(*) FROM pg_available_extensions WHERE name='plperlu'" 2>/dev/null)
-        [ "$pl" = "1" ] && ok "plperlu is available (the feed's only route in)" \
-                        || bad "plperlu not available — the in-database collector cannot run"
+        # Ingestion is pg_cron pulling through pg_clickhouse, so both of these
+        # are load-bearing from module 03 on — not just for the pushdown.
         cr=$(psql_run -tAc \
             "SELECT count(*) FROM pg_available_extensions WHERE name='pg_cron'" 2>/dev/null)
         [ "$cr" = "1" ] && ok "pg_cron is available" \
-                        || bad "pg_cron not available — nothing would schedule the collector"
+                        || bad "pg_cron not available — nothing would schedule the sync"
 
         ch=$(psql_run -tAc \
             "SELECT count(*) FROM pg_available_extensions WHERE name='pg_clickhouse'" 2>/dev/null)
         [ "$ch" = "1" ] && ok "pg_clickhouse is available" \
-                        || warn "pg_clickhouse not available — module 05 will not run"
+                        || bad "pg_clickhouse not available — modules 03 and 06 both need it"
 
-        # Creating an untrusted language needs superuser, and having the
-        # extension on the shelf is not the same as being allowed to install
-        # it. Ask the question that actually matters.
-        su=$(psql_run -tAc "SELECT rolsuper FROM pg_roles WHERE rolname = current_user" 2>/dev/null)
-        [ "$su" = "t" ] && ok "$PGUSER can create untrusted languages" \
-                        || warn "$PGUSER is not a superuser — 'CREATE EXTENSION plperlu' may be refused"
+        # Deliberately not checked: plperlu. It is in the catalogue and it
+        # installs, but the server's Perl has no TLS stack, so it cannot fetch
+        # an https feed. Module 03 covers that, and
+        # sql/03-check-in-db-http.sql re-measures it on your own service.
         wal=$(psql_run -tAc "SELECT current_setting('wal_level')" 2>/dev/null)
         [ "$wal" = "logical" ] && ok "wal_level = logical (ClickPipes can replicate)" \
                                || warn "wal_level = $wal — ClickPipes needs 'logical'"
     else
         bad "cannot connect: $(printf '%s' "$out" | head -1 | mask)"
+    fi
+    echo
+    echo "ClickHouse Cloud"
+    # Needed from module 03, not from module 05: ClickHouse is what fetches the
+    # feed, so an empty CH_HOST stops ingestion, not just the pushdown.
+    if [ -n "${CH_HOST:-}" ] && [ -n "${CH_PASSWORD:-}" ]; then
+        ok "CH_HOST and CH_PASSWORD are set"
+        code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+            -u "${CH_USER:-default}:${CH_PASSWORD}" \
+            "https://${CH_HOST}:${CH_PORT:-8443}/?query=SELECT+1" 2>/dev/null || true)
+        case "$code" in
+            200) ok "HTTPS interface answered SELECT 1" ;;
+            401|403) bad "authentication refused (HTTP $code) — check CH_USER / CH_PASSWORD" ;;
+            *)   bad "no answer from ${CH_HOST}:${CH_PORT:-8443} (HTTP ${code:-none})" ;;
+        esac
+    else
+        bad "CH_HOST / CH_PASSWORD missing — module 03 cannot fetch the feed without them"
     fi
 else
     warn "no .env yet — that is expected before module 01"

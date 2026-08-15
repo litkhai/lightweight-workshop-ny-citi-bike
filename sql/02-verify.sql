@@ -1,7 +1,12 @@
--- Is the Postgres half actually working? Run this after the collector has
--- been up for a few minutes.
+-- Is the Postgres half actually working?
 --
 --   ./scripts/psql.sh -f /sql/02-verify.sql
+--
+-- Safe to run at any point. After module 02 it is all zeroes and the question
+-- is only whether the tables and the publication exist. After module 03, give
+-- it three minutes before concluding anything: the lag is the sum of the two
+-- schedules, up to a minute for the ClickHouse refresh plus up to another for
+-- pg_cron.
 
 \echo '== extensions =='
 SELECT extname, extversion

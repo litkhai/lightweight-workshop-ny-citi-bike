@@ -8,14 +8,15 @@ Notes for delivering this to a room rather than working through it alone.
 |---|---|---|---|
 | 00 Prerequisites | 10 min | 15 min | Docker Desktop not installed on at least one laptop |
 | 01 Provision | 20 min | **40 min** | Account creation, region choice, IP allow-lists |
-| 02 Postgres and feed | 15 min | 20 min | |
-| 03 Spatial | 15 min | 20 min | Good discussion happens here; let it |
-| 04 ClickPipes | 20 min | **35 min** | Second allow-list surprise, and it blocks everything after |
-| 05 Pushdown | 25 min | 30 min | |
-| 06 Dashboard | 15 min | 15 min | |
-| 07 Wrap-up | 10 min | 15 min | Do the teardown *with* them, not as homework |
+| 02 Postgres and the schema | 10 min | 15 min | |
+| 03 The feed | 20 min | **30 min** | Console work, and the RMV needs a minute before anything moves |
+| 04 Spatial | 15 min | 20 min | Good discussion happens here; let it |
+| 05 ClickPipes | 20 min | **35 min** | Second allow-list surprise, and it blocks everything after |
+| 06 Pushdown | 25 min | 30 min | |
+| 07 Dashboard | 15 min | 15 min | |
+| 08 Wrap-up | 10 min | 15 min | Do the teardown *with* them, not as homework |
 
-Budget **3 hours** for a room, not two. The two console modules are where it
+Budget **3½ hours** for a room, not two. The three console modules are where it
 goes.
 
 ## Do this before the session
@@ -28,8 +29,8 @@ not spent on the actual content.
 console changes, and the feed is a live third-party dependency.
 
 **Check the feed on the morning of.** `./scripts/preflight.sh`. If Citi Bike is
-down, point `citibike.feed.discovery_url` at Capital Bikeshare and mention it; nothing else
-changes.
+down, point the two `url()` calls in `clickhouse/01-ingest-rmv.sql` at Capital
+Bikeshare and mention it; nothing else changes.
 
 **Have your own services already provisioned.** When somebody's pipe will not
 connect, you need a working one to demo from rather than debugging in front of
@@ -38,9 +39,15 @@ everyone.
 ## The two places it goes wrong
 
 **IP allow-lists, twice.** In module 01 they add their laptop's IP. In module
-04 the pipe connects from ClickHouse Cloud's network, and their laptop's IP
+05 the pipe connects from ClickHouse Cloud's network, and their laptop's IP
 does nothing for it. People assume they already did this step. Call it out
 explicitly both times.
+
+**The two-minute lag in module 03 reads as a broken pipeline.** It is the sum of
+the two schedules — up to a minute for the refreshable MV, up to another for
+pg_cron. Someone will run `02-verify.sql` fifteen seconds after finishing the
+module, see nothing, and start debugging. Tell them to wait three minutes before
+concluding anything.
 
 **Replicating only the big table.** It is the intuitive optimisation — why
 copy 2,500 rows? — and it silently breaks the pushdown two modules later. If
@@ -53,6 +60,10 @@ better than the warning does.
 **After module 04:** "What would you have to give up to put all of this in one
 engine?" Gets at the actual trade-off rather than a feature comparison.
 
+**After module 03:** "Whose job is it to fetch a feed?" The workshop's answer —
+whichever engine actually can — usually starts an argument about where ingestion
+belongs, which is the useful conversation.
+
 **After module 06, showing the failed pushdown:** "How would you have caught
 this in production?" The answer — you would not, unless you were reading plans
 — is the most valuable thing in the workshop.
@@ -63,10 +74,10 @@ where it came from. What else in your stack has that problem?"
 ## Small groups and shared services
 
 If accounts are a problem, one shared pair of services works. Give everyone
-read-only Postgres credentials, schedule one collector, and have participants do
-modules 02–07 read-only. They lose the schema creation and the ClickPipe setup,
-which are the two most valuable console skills — so prefer individual accounts
-if you can.
+read-only Postgres credentials, run the ingestion once on your own pair, and
+have participants do modules 04–07 read-only. They lose the schema creation, the
+feed setup and the ClickPipe, which are the three most valuable console skills —
+so prefer individual accounts if you can.
 
 ## Common questions
 
@@ -75,7 +86,7 @@ if you can.
 one of about three hundred functions.
 
 **"Why not just use Postgres for everything?"** Resist the cheap answer here.
-Module 05 shows Postgres handling the window function *well*, because the
+Module 06 shows Postgres handling the window function *well*, because the
 module-02 index covers exactly that ordering. The real answer is the one that
 survives scrutiny: you can index for one access path, not for all of them, and
 the second and third analytical question you ask will not be covered. Leave the

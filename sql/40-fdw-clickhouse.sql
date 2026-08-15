@@ -48,7 +48,7 @@ CREATE USER MAPPING FOR CURRENT_USER
 -- Import
 -- --------------------------------------------------------------------------
 --
--- A separate schema, not `bike`. Keeping the two namespaces apart is what
+-- A separate schema, not `citibike`. Keeping the two namespaces apart is what
 -- makes the demo legible: `citibike.station_status` is local, `citibike_ch.station_status`
 -- is remote, and the same query text against either one tells you where the
 -- work went.

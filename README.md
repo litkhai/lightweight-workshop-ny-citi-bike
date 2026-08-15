@@ -77,7 +77,7 @@ Then follow [module 00](workshop/00-prerequisites.md). After provisioning the
 two services in [module 01](workshop/01-provision.md):
 
 ```bash
-cp .env.example .env && $EDITOR .env      # paste both sets of credentials
+./setup.sh                                    # asks for both services, writes .env
 
 ./scripts/psql.sh -f /sql/01-schema.sql       # PostGIS schema + publication
 # then clickhouse/01-ingest-rmv.sql in the ClickHouse SQL console
@@ -101,10 +101,12 @@ docker compose up -d --build ui               # http://localhost:8080
 | 07 | [The dashboard](workshop/07-dashboard.md) | 15 min | |
 | 08 | [Wrap-up and teardown](workshop/08-wrap-up.md) | 10 min | |
 
-Two modules are **console walkthroughs** rather than scripts. Creating cloud
+Three modules are **console walkthroughs** rather than scripts. Creating cloud
 services and connecting a ClickPipe are tied to your own account and billing,
-so the workshop clicks through them with you instead of asking for an
-organization-wide API key. Everything else runs from this repository.
+and module 03's refreshable materialized views are ClickHouse statements that do
+not go through `psql` — so the workshop clicks through those with you instead of
+asking for an organization-wide API key. Everything else runs from this
+repository.
 
 ## What is in here
 
@@ -115,10 +117,9 @@ sql/            01 schema · 02 verify · 03 the Postgres side of ingestion
                 03-check  can Postgres fetch https itself? (no, and why)
                 10 spatial · 20 aggregates · 30 snapshot-to-events
                 40 pg_clickhouse FDW
+setup.sh        asks for both services once and writes .env
 scripts/        preflight · psql (containerised) · explain-pushdown
 ui/             the dashboard — two files, stdlib + psycopg
-collector/      a container that does the same pull from outside — fallback
-                for services that will not permit plperlu
 ```
 
 ## Using a different city
@@ -126,15 +127,20 @@ collector/      a container that does the same pull from outside — fallback
 Nothing is New York-specific except the map's initial centre. Any **docked**
 system in the
 [GBFS registry](https://github.com/MobilityData/gbfs/blob/master/systems.csv)
-works — over 1,500 of them, none requiring a key. The feed URL is a row in the
-database, so switching city is one statement:
+works — over 1,500 of them, none requiring a key.
 
-```sql
-UPDATE citibike.feed SET discovery_url =
-  'https://gbfs.lyft.com/gbfs/2.3/dca-cabi/gbfs.json' WHERE id = 1;
-CALL citibike.discover();
-CALL citibike.load_stations();
+ClickHouse is what fetches the feed, so the URL lives in the two `url()` calls
+in `clickhouse/01-ingest-rmv.sql`. Resolve the discovery document once to find
+them, then edit the file and re-run it:
+
+```bash
+curl -s https://gbfs.lyft.com/gbfs/2.3/dca-cabi/gbfs.json \
+  | python3 -m json.tool | grep -A1 'station_status\|station_information'
 ```
+
+Resolve rather than guess: the host serving the data is often not the one the
+registry lists — Citi Bike registers `gbfs.citibikenyc.com` and serves from
+`gbfs.lyft.com`.
 
 ## Credentials
 
@@ -158,10 +164,9 @@ ClickHouse Cloud 26.4.1:
 - `pg_cron` syncing forward every minute: **22,581 rows over 9 snapshots with five consecutive successful runs and nothing running locally**
 - the schema, the publication, and all five query files
 
-**Verified on a local PostgreSQL 17 + PostGIS 3.6.4 container:** the container
-collector end to end, and the plan shape of the window query — which turned out
-to be index-covered rather than sorting, so module 06 makes the narrower
-argument that survives scrutiny.
+**Verified on a local PostgreSQL 17 + PostGIS 3.6.4 container:** the plan shape
+of the window query — which turned out to be index-covered rather than sorting,
+so module 06 makes the narrower argument that survives scrutiny.
 
 **A negative result, verified and kept:** Postgres cannot fetch the feed
 itself. There is no `http` or `pg_net` extension in the catalogue; `plperlu`

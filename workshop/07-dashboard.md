@@ -84,4 +84,4 @@ files.
 
 ## Next
 
-[07 — Wrap-up and teardown](08-wrap-up.md)
+[08 — Wrap-up and teardown](08-wrap-up.md)

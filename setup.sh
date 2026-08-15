@@ -49,7 +49,7 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 # --------------------------------------------------------------------------
-bold "1/3  ClickHouse Managed Postgres"
+bold "1/2  ClickHouse Managed Postgres"
 dim  "     Console → Postgres → your service → Connect"
 ask        "Host        (…aws.pg.clickhouse.cloud)" ""          PGHOST
 ask        "Port"                                   "5432"      PGPORT
@@ -59,9 +59,9 @@ ask        "Database"                               "postgres"  PGDATABASE
 echo
 
 # --------------------------------------------------------------------------
-bold "2/3  ClickHouse Cloud"
-dim  "     Console → your service → Connect → HTTPS. Needed from module 04 on;"
-dim  "     press Enter to skip and fill it in later."
+bold "2/2  ClickHouse Cloud"
+dim  "     Console → your service → Connect → HTTPS. Module 03 already needs it,"
+dim  "     because ClickHouse is what fetches the feed."
 ask        "Host        (…aws.clickhouse.cloud)"    ""          CH_HOST
 ask        "Port"                                   "8443"      CH_PORT
 ask        "User"                                   "default"   CH_USER
@@ -70,16 +70,16 @@ ask        "Database"                               "default"   CH_DATABASE
 echo
 
 # --------------------------------------------------------------------------
-bold "3/3  The feed"
-dim  "     Any docked system from the GBFS registry. Default is New York."
-ask        "GBFS discovery URL" \
-           "https://gbfs.citibikenyc.com/gbfs/2.3/gbfs.json"    GBFS_URL
-ask        "Seconds between snapshots"              "60"        POLL_SECONDS
-echo
-
-# --------------------------------------------------------------------------
-if [ -z "$PGHOST" ] || [ -z "$PGPASSWORD" ]; then
-    red "PGHOST and the Postgres password are required — nothing was written."
+# Both services are required. ClickHouse is not a later add-on here: it is what
+# fetches the feed in module 03, so an empty CH_HOST means no data at all.
+missing=""
+[ -n "$PGHOST" ]     || missing="$missing PGHOST"
+[ -n "$PGPASSWORD" ] || missing="$missing PGPASSWORD"
+[ -n "$CH_HOST" ]    || missing="$missing CH_HOST"
+[ -n "$CH_PASSWORD" ] || missing="$missing CH_PASSWORD"
+if [ -n "$missing" ]; then
+    red "missing:$missing — nothing was written."
+    red "Both services are needed from module 03 on; create them first (module 01)."
     exit 1
 fi
 
@@ -102,12 +102,10 @@ CH_USER=$CH_USER
 CH_PASSWORD=$CH_PASSWORD
 CH_DATABASE=$CH_DATABASE
 
-# The feed
-GBFS_URL=$GBFS_URL
-GBFS_LANG=en
-POLL_SECONDS=$POLL_SECONDS
+# The feed URL is not here: ClickHouse fetches it, so it lives in the two
+# url() calls in clickhouse/01-ingest-rmv.sql.
 
-# Dashboard. FOREIGN_SCHEMA stays empty until module 05 imports it.
+# Dashboard. FOREIGN_SCHEMA stays empty until module 06 imports it.
 LOCAL_SCHEMA=citibike
 FOREIGN_SCHEMA=
 UI_PORT=8080

@@ -4,15 +4,21 @@
 -- What a bike-share analyst actually wants is the change — a bike left, a bike
 -- arrived. You get that by diffing consecutive snapshots per station.
 --
--- This is the workload that argues hardest for moving off Postgres. A window
--- function partitioned by station over the whole fact table cannot use the
--- index to avoid the sort: it has to order every row in the window. At a few
--- million rows Postgres sorts on disk and you watch it happen.
+-- This is the most interesting workload in the workshop, and not for the
+-- reason you would expect. Read the EXPLAIN at the bottom before assuming
+-- anything: `status_station_time_ix` is (station_key, polled_at), which is
+-- exactly what PARTITION BY station_key ORDER BY polled_at wants, so Postgres
+-- reads straight down the index with **no sort at all**.
+--
+-- The honest argument is therefore narrower than "Postgres is slow at window
+-- functions". It is that you can index for one access path and not for all of
+-- them: change the partition or the ordering and the index stops covering it,
+-- and then you get the sort. Module 06 spells that out.
 --
 --   ./scripts/psql.sh -v s=citibike -f /sql/30-snapshot-to-events.sql
 --
--- The same query against ClickHouse is the ORDER BY the table is already
--- stored in, which is the entire difference.
+-- On ClickHouse the ordering is the table's own storage order, so the shapes
+-- that fall off the Postgres index degrade far more gently there.
 
 \if :{?s}
 \else

@@ -88,8 +88,9 @@ CREATE INDEX IF NOT EXISTS status_time_ix
 --
 -- A station can appear in station_status.json before it appears in
 -- station_information.json, and stations get retired between the two files. A
--- constraint here would reject real observations. The collector inserts the
--- station first when it sees an unknown id, but the guarantee is best-effort
+-- constraint here would reject real observations. The sync procedure in
+-- sql/03-postgres-sync.sql loads the dimension before the facts so that a
+-- station seen this minute has a station_key, but the guarantee is best-effort
 -- by design.
 
 -- --------------------------------------------------------------------------

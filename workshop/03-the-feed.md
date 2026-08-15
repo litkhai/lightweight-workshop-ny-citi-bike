@@ -232,15 +232,6 @@ seconds.
     commands are in [module 08](08-wrap-up.md), and it is worth reading them
     now rather than at the end.
 
-## If you would rather use a container
-
-`collector/` in the repository does the same job from a Docker container in
-about 200 lines of Python. It is a legitimate choice — simpler to reason about,
-no ClickHouse dependency for ingestion, and it is what you would reach for if
-your Postgres were somewhere with an HTTP extension available.
-
-It is not the default here because it needs a machine that stays awake.
-
 ## Next
 
 [04 — The half that cannot move](04-spatial.md)
