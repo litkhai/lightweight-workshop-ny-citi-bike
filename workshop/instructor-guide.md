@@ -9,15 +9,15 @@ Notes for delivering this to a room rather than working through it alone.
 | 00 Prerequisites | 10 min | 15 min | Docker Desktop not installed on at least one laptop |
 | 01 Provision | 20 min | **40 min** | Account creation, region choice, IP allow-lists |
 | 02 Postgres and the schema | 10 min | 15 min | |
-| 03 The feed | 20 min | **30 min** | Console work, and the RMV needs a minute before anything moves |
+| 03 The feed | 20 min | **30 min** | The RMV needs a minute before anything moves, and the lag confuses people |
 | 04 Spatial | 15 min | 20 min | Good discussion happens here; let it |
 | 05 ClickPipes | 20 min | **35 min** | Second allow-list surprise, and it blocks everything after |
 | 06 Pushdown | 25 min | 30 min | |
 | 07 Dashboard | 15 min | 15 min | |
 | 08 Wrap-up | 10 min | 15 min | Do the teardown *with* them, not as homework |
 
-Budget **3½ hours** for a room, not two. The three console modules are where it
-goes.
+Budget **3½ hours** for a room, not two. The two console modules are where most
+of it goes.
 
 ## Do this before the session
 

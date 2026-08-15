@@ -203,7 +203,7 @@ function showTab(name) {
   document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === btn));
   document.querySelectorAll('.tab').forEach(t =>
     t.classList.toggle('on', t.id === 'tab-' + name));
-  if (name === 'maps' && MAP) setTimeout(() => MAP.resize(), 50);
+  if (name === 'maps') setTimeout(() => MAP && MAP.resize(), 50);
   if (name === 'log') loadLog();
   if (name === 'lab') loadLab();
   if (name === 'checks') loadChecks();
@@ -292,7 +292,9 @@ async function loadOverview() {
         <div class="row"><span>pg_cron</span><span>${d.pipeline.cron}</span></div>
         <div class="row"><span>last run</span><span>${d.pipeline.cron_last}</span></div>
         <div class="row"><span>failed runs</span><span>${
-          d.pipeline.cron_failures === null ? '–' : d.pipeline.cron_failures}</span></div></div>
+          d.pipeline.cron_failures === null ? '–' : d.pipeline.cron_failures}</span></div>
+        ${d.pipeline.error ? `<div class="row"><span class="err" style="white-space:normal">${
+          esc(d.pipeline.error)}</span></div>` : ''}</div>
       <div class="card"><h3>Replication → ClickHouse</h3>
         <div class="row"><span>slot</span><span>${d.cdc.slot_active}</span></div>
         <div class="row"><span>state</span><span>${d.cdc.state}</span></div>
@@ -330,9 +332,35 @@ function initMap() {
   try {
     MAP = new maplibregl.Map({
       container: 'map',
-      style: {version: 8, sources: {}, layers: [
-        {id: 'bg', type: 'background', paint: {'background-color': '#101013'}}]},
-      center: [-73.97, 40.74], zoom: 10.6, attributionControl: false,
+      style: {
+        version: 8,
+        sources: {
+          // OpenStreetMap raster tiles. Standard tiles are light and this page
+          // is dark, so they are muted in the layer's own paint properties
+          // rather than with a CSS filter — a filter would apply to the whole
+          // canvas and take the station colours down with it.
+          osm: {
+            type: 'raster',
+            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+            tileSize: 256,
+            maxzoom: 19,
+            attribution:
+              '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+          },
+        },
+        layers: [
+          {id: 'bg', type: 'background', paint: {'background-color': '#101013'}},
+          {id: 'osm', type: 'raster', source: 'osm', paint: {
+            'raster-opacity': 0.8,
+            'raster-saturation': -0.55,
+            'raster-brightness-max': 0.5,
+            'raster-contrast': -0.05,
+          }},
+        ],
+      },
+      center: [-73.97, 40.74], zoom: 10.6,
+      // Attribution is not optional: OSM data is ODbL and requires credit.
+      attributionControl: {compact: true},
     });
     MAP.addControl(new maplibregl.NavigationControl(), 'top-right');
     // A latch rather than a one-shot listener. `once('load')` attached after the
@@ -343,6 +371,13 @@ function initMap() {
       MAP_READY = true;
       if (MAP_PENDING) { const p = MAP_PENDING; MAP_PENDING = null; drawMap(p.key, p.geojson); }
     });
+    // MapLibre measures its container once and never looks again, so a window
+    // resize — or this tab simply becoming visible — leaves the canvas at
+    // whatever width it happened to be built at. One observer covers both, and
+    // both were broken before it.
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(() => MAP && MAP.resize()).observe($('#map'));
+    }
   } catch (e) {
     MAP = null;
     MAP_ERROR = 'MapLibre could not start (usually no WebGL): ' + e.message;
@@ -379,6 +414,11 @@ function drawMap(key, geojson) {
   // addSource before the style has finished loading throws, so hold the newest
   // request and let the load latch flush it.
   if (!MAP_READY) { MAP_PENDING = {key, geojson}; return; }
+  // The map is constructed during boot, which may be before the Maps tab is the
+  // visible one — and a container that is display:none measures zero, leaving
+  // the canvas stuck at a fraction of its width. Cheap to re-assert here, and
+  // it covers the deep-link case that the tab-click handler cannot.
+  MAP.resize();
   try {
     ['lyr-fill', 'lyr-line', 'lyr-pt'].forEach(id => { if (MAP.getLayer(id)) MAP.removeLayer(id); });
     if (MAP.getSource('geo')) MAP.removeSource('geo');

@@ -50,15 +50,15 @@ is there because the real schema already owns the bare name.
 | 00 | [Prerequisites](00-prerequisites.md) | 10 min | Docker |
 | 01 | [Provision the two services](01-provision.md) | 20 min | **console** · a ClickHouse Cloud account |
 | 02 | [Postgres, PostGIS and the schema](02-postgres-and-feed.md) | 10 min | module 01 |
-| 03 | [The feed, with nothing on your laptop](03-the-feed.md) | 20 min | **console** · module 02 |
+| 03 | [The feed, with nothing on your laptop](03-the-feed.md) | 20 min | module 02 |
 | 04 | [The half that cannot move](04-spatial.md) | 15 min | ~10 min of collected data |
 | 05 | [Replicate to ClickHouse](05-clickpipes.md) | 20 min | **console** · module 03 |
 | 06 | [Push the counting down](06-pushdown.md) | 25 min | module 05 |
 | 07 | [The dashboard](07-dashboard.md) | 15 min | module 06 |
 | 08 | [Wrap-up and teardown](08-wrap-up.md) | 10 min | — |
 
-About **2 hours** of hands-on time. Modules 01, 03 and 05 involve the console
-and cannot be rushed; the rest is copy-paste.
+About **2 hours** of hands-on time. Modules 01 and 05 involve the console and
+cannot be rushed; the rest is copy-paste.
 
 Data volume grows while you work. By module 06 you will have tens of thousands
 of rows — enough to see the plans differ, not enough to see Postgres struggle.
@@ -81,7 +81,7 @@ running system, and the pages say which. Where a number depends on your own
 service size or how long you have been collecting, the page says that instead
 of quoting one.
 
-The exception is the console walkthroughs in modules 01 and 04: cloud consoles
+The exception is the console walkthroughs in modules 01 and 05: cloud consoles
 change their wording faster than documentation can follow, so those modules
 describe **what you are looking for** alongside the current labels. If a button
 has been renamed, the surrounding paragraph should still get you there.

@@ -55,11 +55,10 @@ and the two steps that cannot be rushed.
 
 ## Honest scope
 
-Three of the steps in this workshop **cannot be scripted**, and this is by
-design rather than laziness: creating cloud services and connecting a ClickPipe
-are console actions tied to your own account and billing, and the refreshable
-materialized views that fetch the feed are ClickHouse statements that do not go
-through `psql`. Those modules are written as click-through walkthroughs.
+Two of the steps in this workshop **cannot be scripted**, and this is by design
+rather than laziness: creating cloud services and connecting a ClickPipe are
+console actions tied to your own account and billing. Those modules are written
+as click-through walkthroughs.
 
 Everything else — schema, ingestion, queries, dashboard — runs from this
 repository with Docker and nothing else installed.

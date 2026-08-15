@@ -66,9 +66,21 @@ locally.
 
 ## Step 1 — ClickHouse pulls
 
-Open your ClickHouse service's SQL console and run
-[`clickhouse/01-ingest-rmv.sql`](https://github.com/litkhai/lightweight-workshop-ny-citi-bike/blob/main/clickhouse/01-ingest-rmv.sql).
-These are ClickHouse statements — they do not go through `psql`.
+```bash
+./scripts/clickhouse.sh -f /clickhouse/01-ingest-rmv.sql
+```
+
+`clickhouse.sh` is the companion to `psql.sh`: `clickhouse-client` in a
+container, reading `CH_*` from `.env`, with `clickhouse/` mounted at
+`/clickhouse`. Nothing is installed on your machine, and you can paste the file
+into the console instead if you prefer — these are ClickHouse statements either
+way, and they do not go through `psql`.
+
+!!! note "Why a client and not `curl`"
+    The HTTPS interface on 8443 runs **one statement per request**, and this file
+    is a dozen of them. The native protocol on 9440 takes the whole file, which
+    is why `clickhouse.sh` uses that port rather than the `CH_PORT` your
+    dashboard and FDW use.
 
 Its first line is the other half of module 02's naming rule:
 

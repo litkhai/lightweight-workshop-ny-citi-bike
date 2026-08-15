@@ -13,7 +13,7 @@ Have everything installed and verified before you create anything that bills.
 | **Docker Desktop / Engine with Compose v2** | `psql` and the dashboard run in containers, so nothing gets installed on your machine. Docker plays no part in ingestion — both schedulers are server-side |
 | **A ClickHouse Cloud account** | Both services live here. A new account starts with trial credit |
 | **`curl` and `git`** | Fetching the repo and probing the feed |
-| **A browser** | Three modules are console work |
+| **A browser** | Two modules are console work |
 
 No Postgres client, no Python, no ClickHouse client. If `docker` runs, you are
 equipped.

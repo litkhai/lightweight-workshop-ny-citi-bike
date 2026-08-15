@@ -94,8 +94,8 @@ two services in [module 01](workshop/01-provision.md):
 ```bash
 ./setup.sh                                    # asks for both services, writes .env
 
-./scripts/psql.sh -f /sql/01-schema.sql       # PostGIS schema + publication
-# then clickhouse/01-ingest-rmv.sql in the ClickHouse SQL console
+./scripts/psql.sh -f /sql/01-schema.sql             # PostGIS schema + publication
+./scripts/clickhouse.sh -f /clickhouse/01-ingest-rmv.sql   # ClickHouse starts pulling
 ./scripts/psql.sh -f /sql/03-postgres-sync.sql -v ch_host=... -v ch_pass=...
 ./scripts/psql.sh -f /sql/02-verify.sql       # is it moving?
 
@@ -109,19 +109,18 @@ docker compose up -d --build ui               # http://localhost:8080
 | 00 | [Prerequisites](workshop/00-prerequisites.md) | 10 min | |
 | 01 | [Provision the two services](workshop/01-provision.md) | 20 min | **console** |
 | 02 | [Postgres, PostGIS and the schema](workshop/02-postgres-and-feed.md) | 10 min | |
-| 03 | [The feed, with nothing on your laptop](workshop/03-the-feed.md) | 20 min | **console** |
+| 03 | [The feed, with nothing on your laptop](workshop/03-the-feed.md) | 20 min | |
 | 04 | [The half that cannot move](workshop/04-spatial.md) | 15 min | |
 | 05 | [Replicate to ClickHouse](workshop/05-clickpipes.md) | 20 min | **console** |
 | 06 | [Push the counting down](workshop/06-pushdown.md) | 25 min | |
 | 07 | [The dashboard](workshop/07-dashboard.md) | 15 min | |
 | 08 | [Wrap-up and teardown](workshop/08-wrap-up.md) | 10 min | |
 
-Three modules are **console walkthroughs** rather than scripts. Creating cloud
-services and connecting a ClickPipe are tied to your own account and billing,
-and module 03's refreshable materialized views are ClickHouse statements that do
-not go through `psql` — so the workshop clicks through those with you instead of
-asking for an organization-wide API key. Everything else runs from this
-repository.
+Two modules are **console walkthroughs** rather than scripts. Creating cloud
+services and connecting a ClickPipe are tied to your own account and billing, so
+the workshop clicks through them with you instead of asking for an
+organization-wide API key. Everything else — including module 03's ClickHouse
+statements, via `scripts/clickhouse.sh` — runs from this repository.
 
 ## What is in here
 
@@ -133,7 +132,7 @@ sql/            01 schema · 02 verify · 03 the Postgres side of ingestion
                 10 spatial · 20 aggregates · 30 snapshot-to-events
                 40 pg_clickhouse FDW
 setup.sh        asks for both services once and writes .env
-scripts/        preflight · psql (containerised) · explain-pushdown
+scripts/        preflight · psql · clickhouse (both containerised) · explain-pushdown
 ui/             the dashboard — two files, stdlib + psycopg
 ```
 

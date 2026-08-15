@@ -190,16 +190,28 @@ def analyse(plan_json, fdw_ready):
 
 
 def fdw_state(cur):
+    """What is actually reachable, counted per schema rather than globally.
+
+    `in_schema` is the number of foreign tables in FOREIGN_SCHEMA specifically,
+    and `ready` depends on it. A global count is wrong the moment the database
+    holds anything else — this workshop's own module 03 adds two foreign tables
+    in ny_citibike_ingest, and a shared service may carry another project's as
+    well, so "some foreign table exists somewhere" says nothing about whether
+    the pushdown schema was imported.
+    """
     cur.execute("""
         SELECT (SELECT count(*) FROM pg_extension WHERE extname = 'pg_clickhouse'),
                (SELECT count(*) FROM pg_foreign_server),
                (SELECT count(*) FROM information_schema.foreign_tables),
                (SELECT coalesce(string_agg(DISTINCT foreign_table_schema, ', '), '')
-                  FROM information_schema.foreign_tables)""")
-    ext, servers, ftables, fschemas = cur.fetchone()
+                  FROM information_schema.foreign_tables),
+               (SELECT count(*) FROM information_schema.foreign_tables
+                 WHERE foreign_table_schema = %s)""", (FOREIGN_SCHEMA or None,))
+    ext, servers, ftables, fschemas, in_schema = cur.fetchone()
     return {"extension": bool(ext), "servers": servers, "foreign_tables": ftables,
-            "foreign_schemas": fschemas, "local_schema": LOCAL_SCHEMA,
-            "foreign_schema": FOREIGN_SCHEMA, "ready": bool(ftables and FOREIGN_SCHEMA)}
+            "foreign_schemas": fschemas, "in_schema": in_schema,
+            "local_schema": LOCAL_SCHEMA, "foreign_schema": FOREIGN_SCHEMA,
+            "ready": bool(FOREIGN_SCHEMA and in_schema)}
 
 
 def pick_schema(side, state):
@@ -562,10 +574,19 @@ def checks(cur, state):
           "Run sql/03-postgres-sync.sql.")
 
     check("03", "Its last run succeeded",
+          # `or (None, None)`: a scheduled job that has not fired yet returns no
+          # row at all, and "never run" is the answer there — not a crash.
           lambda: (lambda v: (v[0] == 'succeeded', f"{v[0] or 'never run'}"
                               + (f" at {v[1]}" if v[1] else "")))(
-              scalar("""SELECT status, to_char(start_time,'HH24:MI:SS') FROM cron.job_run_details
-                         WHERE jobname='ny_citibike-sync' ORDER BY runid DESC LIMIT 1""")),
+              # job_run_details keys on jobid and carries no jobname column, so
+              # the name has to come from cron.job. A query that assumes
+              # otherwise fails with "column jobname does not exist" rather than
+              # returning nothing, which is how this was caught.
+              scalar("""SELECT d.status, to_char(d.start_time,'HH24:MI:SS')
+                          FROM cron.job_run_details d
+                          JOIN cron.job j USING (jobid)
+                         WHERE j.jobname = 'ny_citibike-sync'
+                         ORDER BY d.runid DESC LIMIT 1""") or (None, None)),
           "Look at return_message in cron.job_run_details — usually the FDW credentials.")
 
     check("03", "ClickHouse landing tables are reachable",
@@ -583,19 +604,28 @@ def checks(cur, state):
           "Up to 2 minutes is normal — one schedule for the MV, one for pg_cron. "
           "Longer than that, check the two above.")
 
-    check("05", "A replication slot is active",
-          lambda: (lambda v: (v[0] is True, "active" if v[0] else
-                              ("slot exists but is INACTIVE — it is retaining WAL"
-                               if v[0] is False else "no slot")))(
-              scalar("SELECT (SELECT active FROM pg_replication_slots LIMIT 1)")),
-          "Create the ClickPipe in module 05. An inactive slot is worse than none: "
-          "it retains WAL forever.")
+    # Named, not counted. There is no publisher-side column linking a slot to
+    # the publication its subscriber reads, so "some slot is active" is not
+    # evidence that *your* pipe is running — on a shared service it will happily
+    # pass on somebody else's. Listing the names lets the reader see that, and
+    # an inactive slot is called out because it retains WAL forever.
+    check("05", "A replication slot exists and is consuming",
+          lambda: (lambda rows: (
+              bool(rows) and all(r[1] for r in rows),
+              "no slot yet" if not rows else
+              ", ".join(f"{r[0]} ({'active' if r[1] else 'INACTIVE — retaining WAL'})"
+                        for r in rows)))(
+              (cur.execute("""SELECT slot_name, active FROM pg_replication_slots
+                               ORDER BY slot_name"""), cur.fetchall())[1]),
+          "Create the ClickPipe in module 05. Then check the slot name belongs to "
+          "it — a slot from another project on the same service proves nothing "
+          "about yours, and an inactive slot retains WAL forever.")
 
     check("06", "Foreign tables imported for the pushdown",
           lambda: (state["ready"],
-                   f"{state['foreign_tables']} foreign table(s) in "
-                   f"{state['foreign_schemas'] or '(none)'}"
-                   + ("" if FOREIGN_SCHEMA else "; FOREIGN_SCHEMA is not set")),
+                   "FOREIGN_SCHEMA is not set" if not FOREIGN_SCHEMA else
+                   f"{state['in_schema']} foreign table(s) in {FOREIGN_SCHEMA}"
+                   f" (all schemas: {state['foreign_schemas'] or 'none'})"),
           "Run sql/40-fdw-clickhouse.sql, then set FOREIGN_SCHEMA in .env and "
           "restart the dashboard.")
 
@@ -762,20 +792,30 @@ class Handler(BaseHTTPRequestHandler):
             # Pillar three, made visible. The two schedulers are the only part
             # of the pipeline with nothing on your laptop to look at, so if the
             # page does not report them there is nowhere to look at all.
-            pipeline = {"cron": "no job", "cron_last": "-", "cron_failures": None,
-                        "landing_newest": None, "landing_lag": None}
+            # "unknown", not "no job". A failing query and an absent job are
+            # different facts, and defaulting to the latter hid a real bug here
+            # for exactly as long as it took to run it against pg_cron: the
+            # query said `WHERE jobname` on cron.job_run_details, which keys on
+            # jobid and has no jobname column. The page cheerfully reported "no
+            # job" about a job that was running fine.
+            pipeline = {"cron": "unknown", "cron_last": "-", "cron_failures": None,
+                        "landing_newest": None, "landing_lag": None, "error": None}
             try:
                 cur.execute("""
                     SELECT coalesce((SELECT jobname || ' · ' || schedule FROM cron.job
                                       WHERE jobname = 'ny_citibike-sync'), 'no job'),
-                           coalesce((SELECT status || ' at ' || to_char(start_time,'HH24:MI:SS')
-                                       FROM cron.job_run_details WHERE jobname = 'ny_citibike-sync'
-                                      ORDER BY runid DESC LIMIT 1), '-'),
-                           (SELECT count(*) FROM cron.job_run_details
-                             WHERE jobname = 'ny_citibike-sync' AND status <> 'succeeded')""")
+                           coalesce((SELECT d.status || ' at ' || to_char(d.start_time,'HH24:MI:SS')
+                                       FROM cron.job_run_details d JOIN cron.job j USING (jobid)
+                                      WHERE j.jobname = 'ny_citibike-sync'
+                                      ORDER BY d.runid DESC LIMIT 1), 'not yet'),
+                           (SELECT count(*) FROM cron.job_run_details d
+                              JOIN cron.job j USING (jobid)
+                             WHERE j.jobname = 'ny_citibike-sync'
+                               AND d.status <> 'succeeded')""")
                 pipeline["cron"], pipeline["cron_last"], pipeline["cron_failures"] = cur.fetchone()
-            except Exception:                                      # noqa: BLE001
+            except Exception as exc:                               # noqa: BLE001
                 conn.rollback()
+                pipeline["error"] = f"{type(exc).__name__}: {str(exc).splitlines()[0]}"
 
             # How far behind ClickHouse's landing table Postgres is. This is the
             # pg_cron half of the lag on its own, which is the number people
