@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NY Citi Bike — PostGIS + ClickHouse</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>
+:root{--bg:#151517;--panel:#1f1f24;--line:#2e2e35;--ink:#ececf0;--dim:#9a9aa4;
+      --yellow:#faff69;--blue:#6ea8fe;--red:#ff7b72;--green:#7ee787;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+     font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+code,pre{font-family:"SFMono-Regular",Consolas,monospace}
+header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;
+       align-items:baseline;gap:14px;flex-wrap:wrap}
+h1{font-size:16px;margin:0;font-weight:650}
+.sub{color:var(--dim);font-size:12px}
+nav{display:flex;gap:4px;padding:10px 20px 0;border-bottom:1px solid var(--line)}
+nav button{background:none;border:none;color:var(--dim);padding:8px 14px;
+           cursor:pointer;font-size:13px;border-bottom:2px solid transparent}
+nav button.on{color:var(--ink);border-bottom-color:var(--yellow)}
+main{padding:20px}
+.tab{display:none}.tab.on{display:block}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px}
+.card h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+         color:var(--dim);font-weight:600}
+.big{font-size:26px;font-weight:650;line-height:1.1}
+.unit{font-size:12px;color:var(--dim);margin-left:4px}
+.row{display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:13px}
+.row span:first-child{color:var(--dim)}
+.pills{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
+.pills button{background:var(--panel);border:1px solid var(--line);color:var(--ink);
+              padding:6px 12px;border-radius:999px;cursor:pointer;font-size:13px}
+.pills button.on{background:var(--yellow);color:#111;border-color:var(--yellow);font-weight:600}
+.badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;
+       font-weight:650;letter-spacing:.02em}
+.b-ch{background:var(--yellow);color:#111}
+.b-pg{background:#3a3a44;color:var(--ink)}
+.b-mix{background:var(--blue);color:#111}
+.b-none{background:#3a3a44;color:var(--dim)}
+#map{height:520px;border-radius:8px;border:1px solid var(--line)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);
+      white-space:nowrap}
+th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+pre{background:#101013;border:1px solid var(--line);border-radius:6px;padding:11px;
+    overflow:auto;font-size:12px;color:#c9d1d9;margin:10px 0 0;max-height:260px}
+details summary{cursor:pointer;color:var(--dim);font-size:12px;margin-top:10px}
+.note{color:var(--dim);font-size:12.5px;margin:0 0 12px;max-width:78ch}
+.verdict{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0}
+.verdict .detail{color:var(--dim);font-size:12.5px}
+.err{color:var(--red);white-space:pre-wrap}
+.spin{color:var(--dim)}
+.maplibregl-popup-content{background:#1f1f24;color:#ececf0;border-radius:8px;
+  font:12px/1.45 -apple-system,sans-serif;padding:9px 11px}
+.maplibregl-popup-tip{border-top-color:#1f1f24!important}
+a{color:var(--yellow)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>NY Citi Bike <span class="sub">— which half of the system answered?</span></h1>
+  <span class="sub" id="hdr"></span>
+</header>
+
+<nav>
+  <button data-tab="over" class="on">Overview</button>
+  <button data-tab="maps">Maps</button>
+  <button data-tab="stats">Statistics</button>
+  <button data-tab="log">Log</button>
+</nav>
+
+<main>
+
+<section class="tab on" id="tab-over">
+  <div class="grid" id="ovCards"><p class="spin">loading…</p></div>
+</section>
+
+<section class="tab" id="tab-maps">
+  <div class="pills" id="mapPills"></div>
+  <p class="note" id="mapNote"></p>
+  <div class="verdict" id="mapVerdict"></div>
+  <div id="map"></div>
+  <details><summary>SQL</summary><pre id="mapSql"></pre></details>
+</section>
+
+<section class="tab" id="tab-stats">
+  <div class="pills" id="aggPills"></div>
+  <div class="pills" id="sidePills"></div>
+  <p class="note" id="aggNote"></p>
+  <div class="verdict" id="aggVerdict"></div>
+  <div style="overflow:auto"><table id="aggTable"></table></div>
+  <details><summary>SQL</summary><pre id="aggSql"></pre></details>
+  <details><summary>Remote SQL (what was actually sent to ClickHouse)</summary>
+    <pre id="aggRemote"></pre></details>
+</section>
+
+<section class="tab" id="tab-log">
+  <div class="grid" id="logSummary"></div>
+  <div style="overflow:auto;margin-top:14px"><table id="logTable"></table></div>
+</section>
+
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const fmt = n => n === null || n === undefined ? '–' : Number(n).toLocaleString();
+let CATALOG = null, MAP = null, mapKey = 'stations', aggKey = 'hourly', side = 'auto';
+
+// ---- tabs -----------------------------------------------------------------
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('.tab').forEach(t =>
+    t.classList.toggle('on', t.id === 'tab-' + b.dataset.tab));
+  if (b.dataset.tab === 'maps' && MAP) setTimeout(() => MAP.resize(), 50);
+  if (b.dataset.tab === 'log') loadLog();
+});
+
+// ---- verdict rendering ----------------------------------------------------
+// The badge is the whole point of the page, so it gets one function and every
+// tab uses it. "no_fdw" is deliberately distinct from "dragged": nothing to
+// push down to is not the same as a pushdown that failed.
+function verdict(el, ran, extra) {
+  const map = {
+    pushed:   ['b-ch',   'ran on ClickHouse'],
+    partial:  ['b-mix',  'partly on ClickHouse'],
+    dragged:  ['b-pg',   'ran on Postgres'],
+    local:    ['b-pg',   'ran on Postgres'],
+    no_fdw:   ['b-none', 'Postgres only'],
+    geometry: ['b-pg',   'PostGIS'],
+  };
+  const [cls, label] = map[ran.verdict] || ['b-none', ran.where];
+  let bits = `<span class="badge ${cls}">${label}</span>
+              <span class="detail">${ran.detail}</span>`;
+  if (ran.rows_crossed !== null && ran.rows_crossed !== undefined)
+    bits += `<span class="detail">· ${fmt(ran.rows_crossed)} rows crossed the wire
+             vs ${fmt(ran.rows_widest)} at the widest plan node</span>`;
+  if (extra) bits += `<span class="detail">· ${extra}</span>`;
+  el.innerHTML = bits;
+}
+
+// ---- overview -------------------------------------------------------------
+async function loadOverview() {
+  try {
+    const d = await (await fetch('/api/overview')).json();
+    if (d.error) throw new Error(d.error);
+    const behind = d.postgres.behind_seconds;
+    const fresh = behind === null ? '–'
+      : behind < 180 ? `${behind}s ago` : `${Math.round(behind / 60)} min ago`;
+    const fdw = d.fdw.ready
+      ? `<span class="badge b-ch">ready</span>`
+      : `<span class="badge b-none">not configured</span>`;
+    $('#ovCards').innerHTML = `
+      <div class="card"><h3>Stations (PostGIS)</h3>
+        <div class="big">${fmt(d.postgres.stations)}</div>
+        <div class="row"><span>geometry</span><span>stays in Postgres</span></div></div>
+      <div class="card"><h3>Snapshots collected</h3>
+        <div class="big">${fmt(d.postgres.rows_estimate)}<span class="unit">rows (est.)</span></div>
+        <div class="row"><span>on disk</span><span>${d.postgres.size || '–'}</span></div>
+        <div class="row"><span>last poll</span><span>${fresh}</span></div></div>
+      <div class="card"><h3>Right now</h3>
+        <div class="big">${fmt(d.snapshot.bikes)}<span class="unit">bikes docked</span></div>
+        <div class="row"><span>e-bikes</span><span>${fmt(d.snapshot.ebikes)}</span></div>
+        <div class="row"><span>free docks</span><span>${fmt(d.snapshot.docks)}</span></div></div>
+      <div class="card"><h3>Replication → ClickHouse</h3>
+        <div class="row"><span>slot</span><span>${d.cdc.slot_active}</span></div>
+        <div class="row"><span>state</span><span>${d.cdc.state}</span></div>
+        <div class="row"><span>unconsumed WAL</span><span>${d.cdc.unconsumed}</span></div>
+        <div class="row"><span>published</span><span>${d.cdc.published}</span></div></div>
+      <div class="card"><h3>pg_clickhouse (FDW)</h3>
+        <div style="margin:6px 0 8px">${fdw}</div>
+        <div class="row"><span>extension</span><span>${d.fdw.extension ? 'installed' : 'no'}</span></div>
+        <div class="row"><span>foreign tables</span><span>${d.fdw.foreign_tables}</span></div>
+        <div class="row"><span>schema</span><span>${d.fdw.foreign_schemas || '–'}</span></div></div>
+      <div class="card"><h3>Server</h3>
+        <div class="row"><span>PostgreSQL</span><span>${d.postgres.version}</span></div>
+        <div class="row"><span>PostGIS</span><span>${d.postgres.postgis}</span></div></div>`;
+    $('#hdr').textContent = `${fmt(d.postgres.stations)} stations · `
+      + `${fmt(d.postgres.rows_estimate)} snapshots · updated ${fresh}`;
+  } catch (e) {
+    $('#ovCards').innerHTML = `<p class="err">${e.message}</p>`;
+  }
+}
+
+// ---- maps -----------------------------------------------------------------
+function initMap() {
+  MAP = new maplibregl.Map({
+    container: 'map',
+    style: {version: 8, sources: {}, layers: [
+      {id: 'bg', type: 'background', paint: {'background-color': '#101013'}}]},
+    center: [-73.97, 40.74], zoom: 10.6, attributionControl: false,
+  });
+  MAP.addControl(new maplibregl.NavigationControl(), 'top-right');
+}
+
+async function loadMap(key) {
+  mapKey = key;
+  document.querySelectorAll('#mapPills button')
+    .forEach(b => b.classList.toggle('on', b.dataset.key === key));
+  $('#mapVerdict').innerHTML = '<span class="spin">running…</span>';
+  try {
+    const d = await (await fetch('/api/map/' + key)).json();
+    if (d.error) throw new Error(d.error);
+    $('#mapNote').textContent = d.note;
+    $('#mapSql').textContent = d.sql;
+    verdict($('#mapVerdict'), d.ran, `${d.ms} ms`);
+
+    if (!MAP) initMap();
+    ['lyr-fill', 'lyr-line', 'lyr-pt'].forEach(id => { if (MAP.getLayer(id)) MAP.removeLayer(id); });
+    if (MAP.getSource('geo')) MAP.removeSource('geo');
+    MAP.addSource('geo', {type: 'geojson', data: d.geojson});
+
+    if (key === 'voronoi') {
+      MAP.addLayer({id: 'lyr-fill', type: 'fill', source: 'geo', paint: {
+        'fill-color': ['interpolate', ['linear'], ['get', 'km2'],
+                       0, '#1d3b53', 0.15, '#2f6690', 0.6, '#faff69'],
+        'fill-opacity': 0.55}});
+      MAP.addLayer({id: 'lyr-line', type: 'line', source: 'geo',
+        paint: {'line-color': '#3a3a44', 'line-width': 0.4}});
+    } else if (key === 'pressure') {
+      MAP.addLayer({id: 'lyr-pt', type: 'circle', source: 'geo', paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 2.5, 15, 9],
+        'circle-color': ['interpolate', ['linear'], ['get', 'net'],
+                         -40, '#ff7b72', 0, '#5a5a66', 40, '#6ea8fe'],
+        'circle-opacity': 0.85}});
+    } else {
+      MAP.addLayer({id: 'lyr-pt', type: 'circle', source: 'geo', paint: {
+        'circle-radius': ['interpolate', ['linear'], ['get', 'bikes'],
+                          0, 2.5, 10, 5, 40, 11],
+        'circle-color': ['case', ['==', ['get', 'bikes'], 0], '#ff7b72', '#faff69'],
+        'circle-opacity': 0.8}});
+    }
+    MAP.off('click', popup); MAP.on('click', popup);
+  } catch (e) {
+    $('#mapVerdict').innerHTML = `<span class="err">${e.message}</span>`;
+  }
+}
+
+function popup(e) {
+  const f = MAP.queryRenderedFeatures(e.point, {layers: ['lyr-pt', 'lyr-fill'].filter(l => MAP.getLayer(l))});
+  if (!f.length) return;
+  const p = f[0].properties;
+  new maplibregl.Popup().setLngLat(e.lngLat).setHTML(
+    Object.entries(p).map(([k, v]) => `<b>${k}</b> ${v}`).join('<br>')).addTo(MAP);
+}
+
+// ---- statistics -----------------------------------------------------------
+async function loadAgg(key) {
+  aggKey = key;
+  document.querySelectorAll('#aggPills button')
+    .forEach(b => b.classList.toggle('on', b.dataset.key === key));
+  $('#aggVerdict').innerHTML = '<span class="spin">running…</span>';
+  $('#aggTable').innerHTML = '';
+  try {
+    const d = await (await fetch(`/api/agg/${key}?side=${side}`)).json();
+    if (d.error) throw new Error(d.error);
+    $('#aggNote').textContent = d.note;
+    $('#aggSql').textContent = d.sql;
+    $('#aggRemote').textContent = d.ran.remote_sql || '(nothing was sent remotely)';
+    verdict($('#aggVerdict'), d.ran, `${d.ms} ms · schema <code>${d.schema}</code>`);
+    const num = i => d.rows.length && !isNaN(Number(d.rows[0][i])) && d.rows[0][i] !== '';
+    $('#aggTable').innerHTML =
+      '<thead><tr>' + d.columns.map((c, i) =>
+        `<th class="${num(i) ? 'num' : ''}">${c}</th>`).join('') + '</tr></thead><tbody>'
+      + d.rows.map(r => '<tr>' + r.map((v, i) =>
+        `<td class="${num(i) ? 'num' : ''}">${v}</td>`).join('') + '</tr>').join('')
+      + '</tbody>';
+  } catch (e) {
+    $('#aggVerdict').innerHTML = `<span class="err">${e.message}</span>`;
+  }
+}
+
+// ---- log ------------------------------------------------------------------
+async function loadLog() {
+  const d = await (await fetch('/api/log')).json();
+  const s = d.summary;
+  $('#logSummary').innerHTML = `
+    <div class="card"><h3>Aggregates run</h3><div class="big">${s.aggregates}</div></div>
+    <div class="card"><h3>Pushed to ClickHouse</h3>
+      <div class="big">${s.pushed_down}</div>
+      <div class="row"><span>total time</span><span>${fmt(s.ms_clickhouse)} ms</span></div></div>
+    <div class="card"><h3>Run in Postgres</h3>
+      <div class="big">${s.run_locally}</div>
+      <div class="row"><span>total time</span><span>${fmt(s.ms_postgres)} ms</span></div></div>
+    <div class="card"><h3>Rows across the wire</h3>
+      <div class="big">${fmt(s.rows_crossed)}</div></div>`;
+  $('#logTable').innerHTML =
+    '<thead><tr><th>#</th><th>at</th><th>query</th><th>schema</th><th>where</th>'
+    + '<th class="num">ms</th><th class="num">rows</th><th>why</th></tr></thead><tbody>'
+    + d.entries.map(e => {
+        const cls = e.where === 'clickhouse' ? 'b-ch' : e.where === 'mixed' ? 'b-mix' : 'b-pg';
+        return `<tr><td class="num">${e.n}</td><td>${e.at}</td>
+          <td>${e.kind}/${e.name}</td><td>${e.schema}</td>
+          <td><span class="badge ${cls}">${e.where}</span></td>
+          <td class="num">${e.ms}</td><td class="num">${fmt(e.rows)}</td>
+          <td style="white-space:normal;color:var(--dim)">${e.detail}</td></tr>`;
+      }).join('') + '</tbody>';
+}
+
+// ---- boot -----------------------------------------------------------------
+(async function () {
+  CATALOG = await (await fetch('/api/catalog')).json();
+  $('#mapPills').innerHTML = CATALOG.maps.map(m =>
+    `<button data-key="${m.key}">${m.label}</button>`).join('');
+  $('#aggPills').innerHTML = CATALOG.aggs.map(a =>
+    `<button data-key="${a.key}">${a.label}</button>`).join('');
+
+  // The side switch only appears once there is a second side to switch to.
+  // Showing a disabled "ClickHouse" button before module 05 would imply the
+  // workshop is broken rather than unfinished.
+  if (CATALOG.fdw.ready) {
+    $('#sidePills').innerHTML =
+      `<button data-side="local">Postgres (${CATALOG.fdw.local_schema})</button>
+       <button data-side="foreign" class="on">ClickHouse (${CATALOG.fdw.foreign_schema})</button>`;
+    side = 'foreign';
+    document.querySelectorAll('#sidePills button').forEach(b => b.onclick = () => {
+      side = b.dataset.side;
+      document.querySelectorAll('#sidePills button')
+        .forEach(x => x.classList.toggle('on', x === b));
+      loadAgg(aggKey);
+    });
+  } else {
+    $('#sidePills').innerHTML =
+      `<span class="note" style="margin:0">No foreign tables yet — everything runs in
+       Postgres. Finish module 05 and a ClickHouse switch appears here.</span>`;
+  }
+
+  document.querySelectorAll('#mapPills button').forEach(b =>
+    b.onclick = () => loadMap(b.dataset.key));
+  document.querySelectorAll('#aggPills button').forEach(b =>
+    b.onclick = () => loadAgg(b.dataset.key));
+
+  loadOverview();
+  setInterval(loadOverview, 30000);
+  initMap();
+  loadMap('stations');
+  loadAgg('hourly');
+})();
+</script>
+</body>
+</html>

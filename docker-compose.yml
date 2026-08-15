@@ -1,0 +1,49 @@
+# Both containers read .env from this directory automatically.
+#
+#   docker compose up -d collector     # start the live feed
+#   docker compose logs -f collector   # watch it
+#   docker compose up -d ui            # the dashboard, http://localhost:8080
+#   docker compose down                # stop everything
+#
+# Nothing is stored in a volume. All state lives in your Managed Postgres
+# service, which is the point — these two containers are disposable.
+
+services:
+  collector:
+    build: ./collector
+    container_name: citibike-collector
+    environment:
+      PGHOST:     ${PGHOST:?set PGHOST in .env}
+      PGPORT:     ${PGPORT:-5432}
+      PGUSER:     ${PGUSER:-postgres}
+      PGPASSWORD: ${PGPASSWORD:?set PGPASSWORD in .env}
+      PGDATABASE: ${PGDATABASE:-postgres}
+      PGSSLMODE:  ${PGSSLMODE:-require}
+
+      GBFS_URL:      ${GBFS_URL:-https://gbfs.citibikenyc.com/gbfs/2.3/gbfs.json}
+      GBFS_LANG:     ${GBFS_LANG:-en}
+      POLL_SECONDS:  ${POLL_SECONDS:-60}
+    restart: unless-stopped
+
+  ui:
+    build: ./ui
+    container_name: citibike-ui
+    ports: ["${UI_PORT:-8080}:8080"]
+    environment:
+      PGHOST:     ${PGHOST:?set PGHOST in .env}
+      PGPORT:     ${PGPORT:-5432}
+      PGUSER:     ${PGUSER:-postgres}
+      PGPASSWORD: ${PGPASSWORD:?set PGPASSWORD in .env}
+      PGDATABASE: ${PGDATABASE:-postgres}
+      PGSSLMODE:  ${PGSSLMODE:-require}
+
+      # Geometry lives here and never moves.
+      LOCAL_SCHEMA: ${LOCAL_SCHEMA:-bike}
+
+      # Where sql/40-fdw-clickhouse.sql imported the foreign tables. Empty
+      # until module 05. Left empty the dashboard says plainly that there is
+      # nothing to push down to, rather than reporting a failed pushdown.
+      FOREIGN_SCHEMA: ${FOREIGN_SCHEMA:-}
+
+      STATEMENT_TIMEOUT_MS: ${STATEMENT_TIMEOUT_MS:-120000}
+    restart: unless-stopped

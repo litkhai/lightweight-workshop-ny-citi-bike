@@ -1,0 +1,72 @@
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    name: shell / python / yaml / compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse-check tracked files
+        run: |
+          fail=0
+          for f in $(git ls-files '*.sh'); do bash -n "$f" || fail=1; done
+          for f in $(git ls-files '*.py'); do python3 -m py_compile "$f" || fail=1; done
+          for f in $(git ls-files '*.yml' '*.yaml'); do
+            python3 -c "import sys,yaml; yaml.safe_load(open(sys.argv[1]))" "$f" || fail=1
+          done
+          exit $fail
+      - name: Compose file is valid
+        # The compose file uses ${VAR:?} guards, so it needs the variables
+        # present to render. Values are irrelevant here; presence is not.
+        run: |
+          cp .env.example .env
+          sed -i 's/^PGPASSWORD=$/PGPASSWORD=ci/' .env
+          docker compose config --quiet
+
+  docs:
+    name: docs build (strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install --requirement requirements-docs.txt
+      - name: Every nav entry and internal link resolves
+        run: mkdocs build --strict
+
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  hygiene:
+    name: repository hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No .env committed, no host absolute paths
+        run: |
+          fail=0
+          if git ls-files | grep -qx '.env'; then
+            echo "'.env' is tracked — it holds real credentials"; fail=1
+          fi
+          if git grep -InI -e '/Users/' -- ':!*.md' ':!.github/*'; then
+            echo "host home paths in code"; fail=1
+          fi
+          exit $fail

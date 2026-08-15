@@ -1,0 +1,69 @@
+# Workshop overview
+
+## Who this is for
+
+Anyone evaluating whether an operational Postgres and an analytical ClickHouse
+can share one workload without turning into two disconnected systems. You
+should be comfortable with SQL and a terminal. You do not need to know PostGIS
+or ClickHouse beforehand — both are introduced through the one problem this
+dataset poses.
+
+## The shape of the problem
+
+Citi Bike gives you two datasets with completely different physics:
+
+| | What it is | Size | Changes | Wants |
+|---|---|---|---|---|
+| **Stations** | dock locations, capacity, names | ~2,500 rows | rarely | spatial indexes, geometry types |
+| **Status** | bikes and docks free, per station, per minute | +3.6M rows/day | constantly | column storage, fast aggregation |
+
+Putting both in one engine means one of them is badly served. Putting them in
+two engines usually means an ETL job, a copy that goes stale, and two query
+languages.
+
+The third option is what this workshop builds: both tables replicated to
+ClickHouse, `pg_clickhouse` bringing them back into the Postgres session as
+foreign tables, and the query planner deciding what runs where. The join key is
+a `bigint`, so no geometry ever has to cross.
+
+## Modules
+
+| | Module | Time | Needs |
+|---|---|---|---|
+| 00 | [Prerequisites](00-prerequisites.md) | 10 min | Docker |
+| 01 | [Provision the two services](01-provision.md) | 20 min | **console** · a ClickHouse Cloud account |
+| 02 | [Postgres, PostGIS and the live feed](02-postgres-and-feed.md) | 15 min | module 01 |
+| 03 | [The half that cannot move](03-spatial.md) | 15 min | ~10 min of collected data |
+| 04 | [Replicate to ClickHouse](04-clickpipes.md) | 20 min | **console** · module 02 |
+| 05 | [Push the counting down](05-pushdown.md) | 25 min | module 04 |
+| 06 | [The dashboard](06-dashboard.md) | 15 min | module 05 |
+| 07 | [Wrap-up and teardown](07-wrap-up.md) | 10 min | — |
+
+About **2 hours** of hands-on time. Modules 01 and 04 are console work and
+cannot be rushed; the rest is copy-paste.
+
+Data volume grows while you work. By module 05 you will have tens of thousands
+of rows — enough to see the plans differ, not enough to see Postgres struggle.
+If you want timings that mean something, leave the collector running overnight
+and come back: at 3.6M rows a day the aggregates in module 05 get slow enough
+locally that the comparison stops being academic.
+
+## What you will be able to say afterwards
+
+- Which specific operations cannot leave Postgres, and why the geometry type is the reason
+- What a pushed-down aggregate looks like in `EXPLAIN`, and what a failed one looks like
+- The single most common way a working pushdown quietly stops working
+- What logical replication needs from a Postgres table before ClickPipes will accept it
+- Why a fast query is not evidence that anything was pushed down
+
+## Ground rules for the numbers
+
+Every claim in these pages that has a number attached was measured against a
+running system, and the pages say which. Where a number depends on your own
+service size or how long you have been collecting, the page says that instead
+of quoting one.
+
+The exception is the console walkthroughs in modules 01 and 04: cloud consoles
+change their wording faster than documentation can follow, so those modules
+describe **what you are looking for** alongside the current labels. If a button
+has been renamed, the surrounding paragraph should still get you there.

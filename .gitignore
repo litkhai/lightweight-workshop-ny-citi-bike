@@ -1,0 +1,13 @@
+# Real connection details never belong in a public repository.
+.env
+*.pem
+*.key
+
+# MkDocs build output — rebuilt by CI on every push.
+site/
+.venv-docs/
+
+__pycache__/
+*.py[cod]
+.DS_Store
+*.log

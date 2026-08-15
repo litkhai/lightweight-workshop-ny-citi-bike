@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block announce %}
+  <span class="ch-announce__dot" aria-hidden="true"></span>
+  <strong>Self-service workshop</strong>
+  <span class="ch-announce__separator" aria-hidden="true">·</span>
+  live public data
+  <span class="ch-announce__separator" aria-hidden="true">·</span>
+  8 modules
+  <span class="ch-announce__separator" aria-hidden="true">·</span>
+  every claim read out of the query plan
+{% endblock %}
+
+{% block site_nav %}
+  {% if nav and not (page and page.is_homepage) %}
+    {% if page.meta and page.meta.hide %}
+      {% set hidden = "hidden" if "navigation" in page.meta.hide %}
+    {% endif %}
+    <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" {{ hidden }}>
+      <div class="md-sidebar__scrollwrap">
+        <div class="md-sidebar__inner">
+          {% include "partials/nav.html" %}
+        </div>
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  {% if page and page.is_homepage %}
+    <section class="ch-hero" aria-labelledby="ch-hero-title">
+      <div class="ch-hero__copy">
+        <p class="ch-hero__eyebrow">LIVE DATA · POSTGIS · CLICKHOUSE CLOUD</p>
+        <h1 id="ch-hero-title">Keep the map. Move the counting.</h1>
+        <p class="ch-hero__lead">
+          2,500 bike docks reporting every minute. Geometry stays in Postgres,
+          aggregates run on ClickHouse — and the plan proves which one answered.
+        </p>
+        <div class="ch-hero__actions">
+          <a class="ch-button ch-button--primary" href="{{ '00-prerequisites/' | url }}">
+            Start module 00 <span aria-hidden="true">→</span>
+          </a>
+          <a class="ch-button ch-button--secondary" href="{{ 'workshop-overview/' | url }}">
+            Read the overview
+          </a>
+        </div>
+        <dl class="ch-hero__facts">
+          <div><dt>~2h</dt><dd>hands-on path</dd></div>
+          <div><dt>8</dt><dd>guided modules</dd></div>
+          <div><dt>0</dt><dd>API keys needed for the data</dd></div>
+        </dl>
+      </div>
+      <div class="ch-hero__visual" aria-hidden="true">
+        <div class="ch-hero__label">DOCKS REPORTING</div>
+        <div class="ch-bars">
+          <span style="--bar-height: 41%"></span>
+          <span style="--bar-height: 63%"></span>
+          <span style="--bar-height: 52%"></span>
+          <span style="--bar-height: 88%"></span>
+          <span style="--bar-height: 71%"></span>
+          <span style="--bar-height: 95%"></span>
+          <span style="--bar-height: 67%"></span>
+        </div>
+        <div class="ch-hero__flow">
+          <span>GBFS</span><i>→</i><span>POSTGIS</span><i>→</i><span>CLICKHOUSE</span>
+        </div>
+      </div>
+    </section>
+  {% endif %}
+  {{ super() }}
+{% endblock %}
