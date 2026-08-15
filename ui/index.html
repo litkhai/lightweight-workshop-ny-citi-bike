@@ -74,6 +74,9 @@ kbd{background:#2a2a32;border:1px solid var(--line);border-radius:4px;padding:1p
 @media(max-width:1000px){.sides.two{grid-template-columns:1fr}}
 .side h4{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;
   color:var(--dim);font-weight:650}
+.side h4 .hint{text-transform:none;letter-spacing:0;font-weight:400}
+/* The plan is the lesson, so 200 result rows must not push it below the fold. */
+.tblwrap{overflow:auto;max-height:320px;border:1px solid var(--line);border-radius:6px}
 .goal{background:#1a1a1f;border-left:2px solid var(--yellow);padding:9px 12px;
   border-radius:0 6px 6px 0;margin:0 0 12px;font-size:12.5px;color:var(--dim);max-width:82ch}
 .goal b{color:var(--ink);font-weight:600}
@@ -454,7 +457,7 @@ let EX = null, exKey = 'count', labSide = 'both';
 function resultTable(r) {
   if (!r.columns.length) return '<p class="hint">no columns returned</p>';
   const num = i => r.rows.length && r.rows[0][i] !== '' && !isNaN(Number(r.rows[0][i]));
-  return '<div style="overflow:auto"><table><thead><tr>'
+  return '<div class="tblwrap"><table><thead><tr>'
     + r.columns.map((c, i) => `<th class="${num(i) ? 'num' : ''}">${esc(c)}</th>`).join('')
     + '</tr></thead><tbody>'
     + r.rows.map(row => '<tr>' + row.map((v, i) =>
@@ -481,13 +484,16 @@ async function labRun() {
       if (r.error) return `<div class="card side">${head}
         <p class="err">${esc(r.error)}</p>
         <details><summary>SQL</summary><pre>${esc(r.sql)}</pre></details></div>`;
+      // Plan above the rows, open by default. The verdict says where it ran;
+      // the plan says how — and that is what the exercises are actually about.
       return `<div class="card side">${head}
         <div class="verdict" data-v="${r.side}"></div>
-        ${resultTable(r)}
-        <details><summary>Plan tree</summary><div class="plan" data-p="${r.side}"></div></details>
+        <details open><summary>Plan tree</summary><div class="plan" data-p="${r.side}"></div></details>
         <details><summary>Remote SQL</summary><pre>${
           esc(r.ran.remote_sql || '(nothing was sent remotely)')}</pre></details>
-        <details><summary>SQL as sent</summary><pre>${esc(r.sql)}</pre></details></div>`;
+        <details><summary>SQL as sent</summary><pre>${esc(r.sql)}</pre></details>
+        <p class="hint" style="margin:12px 0 6px">${fmt(r.rows.length)} row(s)</p>
+        ${resultTable(r)}</div>`;
     }).join('');
     d.results.filter(r => !r.error).forEach(r => {
       verdict($(`.verdict[data-v="${r.side}"]`), r.ran, `${r.ms} ms`);
