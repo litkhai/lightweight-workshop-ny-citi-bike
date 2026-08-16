@@ -25,7 +25,7 @@ to. Read [the naming rule](workshop-overview.md#names) first if you have not.
 │   station_status  ◄─┤ ④ ClickPipes CDC from Postgres                     │
 │   sim_trips       ◄─┘                                                    │
 │        │                                                                 │
-│        │ ⑤ read as ny_citibike_ch.* — this is what module 06 measures    │
+│        │ ⑤ ny_citibike_ch.* — NOT a copy: queries go, answers return     │
 └────────┼─────────────────────────────────────────────────────────────────┘
          │                    ▲                        │
          │                    │ ④                      │ ⑤
@@ -45,6 +45,8 @@ to. Read [the naming rule](workshop-overview.md#names) first if you have not.
 │                                     internals, never replicated)         │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
+
+Routes ① to ④ move rows. **Route ⑤ does not** — it is a query path, and the section on it explains why that distinction matters more than any other on this page.
 
 `station_status` makes a round trip: ClickHouse → Postgres → ClickHouse. That is
 route ② followed by route ④, and it is the single most confusing thing here.
@@ -184,14 +186,68 @@ replica identity on every table, which is why each has a bigint primary key.
 Adding a table to the publication does **not** add it to an existing pipe — select
 it in the console too. Set up in [module 05](05-clickpipes.md).
 
-### ⑤ ClickHouse → Postgres, by `pg_clickhouse`
+### ⑤ Postgres asks ClickHouse, by `pg_clickhouse`
 
-Foreign tables in `ny_citibike_ch`. The FDW dials **outward from the Postgres
-server**, so both ends have to be somewhere the other can reach — which is why the
-workshop uses ClickHouse Cloud rather than a container on your laptop.
+**This one is not like the other four, and the arrow is the reason people misread
+it.** Routes ① to ④ move rows: something is copied and afterwards a second copy
+exists. Route ⑤ moves *no rows at all*.
 
-This is the route [module 06](06-pushdown.md) measures. File
-`sql/40-fdw-clickhouse.sql`.
+`ny_citibike_ch` is a Postgres schema containing **foreign tables**, and a foreign
+table stores nothing. It is a declaration that a table of this shape exists over
+there. When you read one, Postgres does not fetch the table — it rewrites your
+query, sends the rewritten text to ClickHouse, and receives the finished answer.
+
+Here is an actual round trip, taken from the dashboard:
+
+```sql
+-- You write this, against Postgres, with no schema prefix:
+SELECT extract(hour FROM polled_at)::int AS hour_utc,
+       count(*)                          AS observations,
+       round(avg(num_bikes_available), 1) AS avg_bikes
+FROM station_status
+GROUP BY 1 ORDER BY 1;
+```
+
+```sql
+-- Postgres sends this to ClickHouse:
+SELECT cast(toHour(polled_at), 'Nullable(Int32)'),
+       count(*),
+       round(avg(num_bikes_available), 1)
+FROM ny_citibike.station_status
+GROUP BY (cast(toHour(polled_at), 'Nullable(Int32)'))
+ORDER BY ...
+```
+
+```text
+-- 19 rows come back, in 125 ms. The 1.2M rows behind them never moved.
+```
+
+Three things to notice.
+
+**The aggregation is in the remote text.** `count(*)`, `avg()` and the `GROUP BY`
+all went. That is the pushdown, and it is the only reason 19 rows came back
+instead of 1.2 million.
+
+**The dialect was translated.** `extract(hour FROM …)` is Postgres; `toHour(…)` is
+ClickHouse. You wrote one, the wrapper sent the other. This is what "one endpoint,
+one dialect" buys — and also the limit of it, because anything the wrapper cannot
+translate stays home and drags the rows back with it.
+
+**Nothing was stored.** Ask again in a minute and the whole exchange happens
+again. `ny_citibike_ch` is not a cache and not a copy; it is a query path with a
+schema name.
+
+The FDW also dials **outward from the Postgres server**, not from your laptop, so
+both ends have to be somewhere the other can reach — which is why the workshop
+uses ClickHouse Cloud on both sides rather than a local container.
+
+File `sql/40-fdw-clickhouse.sql`; measured in [module 06](06-pushdown.md).
+
+!!! note "Why an unqualified name reaches here first"
+    The dashboard and the Lab set `search_path = ny_citibike_ch, ny_citibike`, so
+    `FROM station_status` resolves to the foreign table and pushes down without
+    anyone choosing it. Naming a table explicitly — `ny_citibike.stations` — opts
+    back out, which is how the counter-example is built.
 
 ## What this buys, measured
 

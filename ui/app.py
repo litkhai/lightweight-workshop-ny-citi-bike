@@ -62,6 +62,21 @@ LOG_LOCK = threading.Lock()
 SEQ = itertools.count(1)
 
 
+def _last_pushdown():
+    """The newest query whose work went to ClickHouse, from the session log.
+
+    The FDW hop is the one people misread — it looks like a second replication
+    path when it is a query path. Quoting the last Remote SQL next to it turns
+    "only the result comes back" from a claim into something on screen.
+    """
+    with LOG_LOCK:
+        for e in LOG:
+            if e["where"] == "clickhouse" and e["remote_sql"]:
+                return {"sql": e["sql"], "remote_sql": e["remote_sql"],
+                        "ms": e["ms"], "rows": e["rows"], "at": e["at"]}
+    return None
+
+
 def record(kind, name, verdict, ms, rows, sql, schema=""):
     with LOG_LOCK:
         LOG.appendleft({
@@ -1111,6 +1126,9 @@ class Handler(BaseHTTPRequestHandler):
                          "last_poll": last_poll, "behind_seconds": behind},
             "snapshot": {"stations": snap[0], "bikes": snap[1],
                          "ebikes": snap[2], "docks": snap[3]},
+            # The most recent query the planner actually sent away, so the card
+            # can show what travels rather than assert it.
+            "last_pushdown": _last_pushdown(),
             "cdc": {"state": cdc_state, "slots": slots, "slots_idle": slots_idle,
                     "unconsumed": unconsumed, "publication": "ny_citibike_pub",
                     "pub_tables": pub_n, "pub_list": pub_tables},

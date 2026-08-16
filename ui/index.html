@@ -143,6 +143,15 @@ kbd{background:#2a2a32;border:1px solid var(--line);border-radius:4px;padding:1p
 .hop .what{color:var(--ink)}
 .hop .what code{color:var(--dim);font-size:11.5px}
 .hop .det{color:var(--dim)}
+.hop .det b{color:var(--ink);font-weight:600}
+.hop.bad .det b{color:var(--red)}
+.lastpd{margin-top:10px}
+.pd{display:grid;grid-template-columns:180px 1fr;gap:4px 14px;align-items:start;
+  margin-top:8px}
+@media(max-width:760px){.pd{grid-template-columns:1fr}}
+.pd-l{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+  padding-top:14px}
+.pd pre{margin:6px 0 0;max-height:150px}
 .hop.bad .det{color:var(--red)}
 .kpi .spark{margin-top:6px}
 
@@ -566,33 +575,51 @@ async function loadOverview() {
         <div class="row"><span>e-bikes</span><span>${fmt(d.snapshot.ebikes)}</span></div>
         <div class="row"><span>free docks</span><span>${fmt(d.snapshot.docks)}</span></div></div>`;
 
-    // Only the round trip this workshop is about.
+    // The two directions are NOT the same kind of thing, and drawing them as a
+    // matching pair of arrows was the confusing part.
     //
-    // The GBFS pull and the pg_cron copy-forward used to be hops 1 and 2 here.
-    // They are how the data got in, which is scaffolding — the subject is what
-    // happens between the two engines once it has. "Is data arriving" is the
-    // `last poll` line on the tile above.
+    //   CDC   moves rows. A copy exists on the other side afterwards.
+    //   FDW   moves nothing. The schema stores no data at all; a query against
+    //         it is rewritten, sent to ClickHouse, and only the answer returns.
+    //
+    // So they get different marks and different verbs, and the FDW hop quotes
+    // the last Remote SQL the planner actually sent — the claim on screen.
+    const lp = d.last_pushdown;
     $('#ovPipe').innerHTML = `
       <h3>Postgres ↔ ClickHouse<span class="meta">${esc(d.postgres.version)} ·
         PostGIS ${esc(d.postgres.postgis)}</span></h3>
       <div class="hops">
-        ${hop('→', 'Postgres <code>ny_citibike</code> → ClickHouse',
+        ${hop('⇉', 'Rows are copied out',
               cdc.pub_tables
-                ? `ClickPipes CDC · <code>${esc(cdc.publication)}</code> carries `
-                  + `${esc(cdc.pub_list)} · ${esc(cdc.state)} · `
-                  + `${esc(cdc.unconsumed)} unconsumed WAL`
-                  + (idle ? ` · ${cdc.slots_idle} INACTIVE slot retaining WAL`
+                ? `<b>ClickPipes CDC.</b> <code>${esc(cdc.publication)}</code> carries `
+                  + `${esc(cdc.pub_list)}. Every insert is replayed into ClickHouse and `
+                  + `stored there — a second copy that outlives the query. `
+                  + `${esc(cdc.state)} · ${esc(cdc.unconsumed)} unconsumed WAL`
+                  + (idle ? ` · <b>${cdc.slots_idle} INACTIVE slot retaining WAL</b>`
                           : ` · ${cdc.slots} slot${cdc.slots === 1 ? '' : 's'}, all active`)
                 : 'publication is empty — run sql/01-schema.sql',
               !cdc.pub_tables || idle ? 'bad'
                 : cdc.state === 'not connected' ? 'warn' : 'ok')}
-        ${hop('←', 'ClickHouse → Postgres <code>ny_citibike_ch</code>',
+        ${hop('⟲', 'Queries are sent over',
               d.fdw.ready
-                ? `pg_clickhouse · ${d.fdw.in_schema} foreign tables · an unqualified `
-                  + `query reaches these before the real ones, so it pushes down`
+                ? `<b>pg_clickhouse.</b> <code>${esc(d.fdw.foreign_schema)}</code> holds `
+                  + `${d.fdw.in_schema} foreign tables and <b>stores nothing</b>. Reading one `
+                  + `does not copy rows back — Postgres rewrites your query, sends it to `
+                  + `ClickHouse, and receives the finished answer. That is the pushdown, `
+                  + `and it is why an unqualified name resolving here is the whole trick.`
                 : 'no foreign tables yet — module 06 imports them',
               d.fdw.ready ? 'ok' : 'warn')}
-      </div>`;
+      </div>
+      ${lp ? `<details class="lastpd"><summary>What actually travelled, last time</summary>
+        <div class="pd">
+          <div class="pd-l">you wrote</div><pre>${esc(lp.sql)}</pre>
+          <div class="pd-l">Postgres sent to ClickHouse</div><pre>${esc(lp.remote_sql)}</pre>
+          <div class="pd-l">came back</div>
+          <p class="hint" style="margin:6px 0 0">${fmt(lp.rows)} row(s) in ${lp.ms} ms,
+            at ${esc(lp.at)}. The rows behind that answer never left ClickHouse.</p>
+        </div></details>`
+      : `<p class="hint" style="margin:10px 0 0">Run anything in the Lab and this card
+          will show the exact text Postgres sent to ClickHouse.</p>`}`;
 
     $('#hdr').textContent = `${fmt(d.postgres.stations)} stations · `
       + `${fmt(d.postgres.rows_estimate)} snapshots · updated ${fresh}`;
