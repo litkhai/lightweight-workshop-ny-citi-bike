@@ -406,7 +406,8 @@ DECLARE
     p     ny_citibike.sim_params;
     tpd   integer;
     d     date;
-    day0  date := (now() AT TIME ZONE 'UTC')::date - days;
+    -- Local date, to match the local-time hour profile below.
+    day0  date := (now() AT TIME ZONE 'America/New_York')::date - days;
     total bigint := 0;
     n     bigint;
 BEGIN
@@ -443,8 +444,13 @@ BEGIN
             (started_at, ended_at, start_station_key, end_station_key,
              duration_s, meters, rideable_type, member_casual, source)
         WITH hours AS (
-            -- Hour-of-day weights. Weekday: 8am and 6pm peaks. Weekend: one
-            -- broad afternoon hump.
+            -- Hour-of-day weights in NEW YORK LOCAL TIME, which is the whole
+            -- reason for the AT TIME ZONE further down. Getting this wrong is
+            -- easy and invisible in aggregate: the first version treated h as
+            -- UTC, which put the morning commuter peak at 04:00 local. The shape
+            -- looked perfect and the clock was four hours out.
+            --
+            -- Weekday: 8am and 6pm peaks. Weekend: one broad afternoon hump.
             SELECT h,
                    CASE WHEN extract(isodow FROM d) < 6
                         THEN 0.2 + 2.4 * exp(-((h - 8.3) ^ 2) / 4.0)
@@ -464,8 +470,12 @@ BEGIN
                    )::int AS n
             FROM norm
         ), one AS (
+            -- Interpret the naive local timestamp as New York time. This is what
+            -- makes the 8am weight land at 8am for a rider; DST is handled by the
+            -- zone rather than by an offset that would be wrong half the year.
             SELECT (d + make_interval(hours => ph.h)
-                      + (random() * interval '1 hour')) AT TIME ZONE 'UTC' AS started_at,
+                      + (random() * interval '1 hour'))
+                        AT TIME ZONE 'America/New_York' AS started_at,
                    random() AS r_start, random() AS r_dest, random() AS r_type,
                    random() AS r_member, random() AS r_speed
             FROM per_hour ph, generate_series(1, greatest(ph.n, 0))

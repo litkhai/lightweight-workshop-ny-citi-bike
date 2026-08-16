@@ -113,6 +113,33 @@ So `sim_params.observed_scale` keeps each derived departure with probability
 the part worth having — *which dock* and *which minute*, both measured. The count
 is a calibration and the file says so.
 
+## The peaks are in local time, and that took two goes
+
+The backfill's hour weights describe a commuter day: a morning peak at 08:00, a
+larger evening one at 18:00, a midday trough, quiet nights. Generated over 90
+days the shape comes out exactly as intended.
+
+The first version put them in the wrong clock. The weights were applied to UTC
+hours, so the morning peak landed at **04:00 New York time** — and the aggregate
+looked flawless, because a double-humped curve is a double-humped curve whatever
+the labels say. Only reading the hours as a New Yorker catches it.
+
+```sql
+-- The profile is local; this is what makes hour 8 mean 8am to a rider.
+(day + make_interval(hours => h)) AT TIME ZONE 'America/New_York'
+```
+
+Naming the zone rather than subtracting four hours also means DST is right in
+both halves of the year.
+
+If you generated a backfill before this was fixed, its peaks are four hours out.
+Regenerate to correct it:
+
+```sql
+DELETE FROM ny_citibike.sim_trips WHERE source = 'modelled';
+CALL ny_citibike.sim_backfill(90);
+```
+
 ## Tuning it
 
 Every knob is a column in one row:
