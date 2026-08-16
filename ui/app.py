@@ -316,6 +316,38 @@ SELECT json_build_object(
           'net', round((a.pct_no_docks - a.pct_no_bikes)::numeric, 1))
   )), '[]'::json))
 FROM agg a JOIN {L}.stations s USING (station_key)"""},
+
+    "flows": {
+        "label": "Where rides go",
+        "note": "The busiest origin-destination pairs, drawn as lines between the "
+                "two docks. Trips are GENERATED — GBFS has no trip feed — but the "
+                "geometry is real, and ST_MakeLine is the reason this cannot leave "
+                "Postgres.",
+        "sql": """
+WITH od AS (
+    SELECT start_station_key, end_station_key, count(*) AS trips
+    FROM {L}.sim_trips
+    WHERE started_at > now() - interval '24 hours'
+    GROUP BY 1, 2
+    HAVING count(*) >= 2
+    ORDER BY trips DESC
+    LIMIT 600
+)
+SELECT json_build_object(
+  'type', 'FeatureCollection',
+  'features', coalesce(json_agg(json_build_object(
+      'type', 'Feature',
+      -- A straight line between two docks, not a route. The point is that
+      -- building it needs both geometries, so it belongs here and nowhere else.
+      'geometry', ST_AsGeoJSON(ST_MakeLine(a.geom, b.geom))::json,
+      'properties', json_build_object(
+          'from', a.name, 'to', b.name, 'trips', od.trips,
+          'km', round((ST_Distance(a.geom::geography, b.geom::geography)/1000)::numeric, 2))
+  )), '[]'::json))
+FROM od
+JOIN {L}.stations a ON a.station_key = od.start_station_key
+JOIN {L}.stations b ON b.station_key = od.end_station_key
+WHERE a.geom IS NOT NULL AND b.geom IS NOT NULL"""},
 }
 
 # --------------------------------------------------------------------------- #
@@ -383,6 +415,52 @@ SELECT date_trunc('hour', polled_at) AS hour_utc,
              / nullif(sum(num_bikes_available), 0), 1) AS pct_electric
 FROM {S}.station_status
 GROUP BY 1 ORDER BY 1 DESC LIMIT 48"""},
+
+    "trip_hours": {
+        "label": "Trips by hour",
+        "note": "Over the generated trip table, which is far larger than "
+                "station_status. Same pushdown shape — whole table in, 24 rows out "
+                "— and note the two halves: 'observed' rides are anchored to real "
+                "feed deltas, 'modelled' ones are the backfill.",
+        "sql": """
+SELECT extract(hour FROM started_at)::int AS hour_utc,
+       source,
+       count(*)                    AS trips,
+       round(avg(duration_s))      AS avg_seconds,
+       round(avg(meters))          AS avg_meters
+FROM {S}.sim_trips
+GROUP BY 1, 2 ORDER BY 1, 2"""},
+
+    "trip_pairs": {
+        "label": "Busiest routes",
+        "note": "A self-join on the trip table plus two joins to stations — four "
+                "relations, all remote when the schema is the foreign one. This is "
+                "the shape that most clearly shows a join being pushed down.",
+        "sql": """
+SELECT a.name AS from_station,
+       b.name AS to_station,
+       count(*)               AS trips,
+       round(avg(t.duration_s)) AS avg_seconds
+FROM {S}.sim_trips t
+JOIN {S}.stations a ON a.station_key = t.start_station_key
+JOIN {S}.stations b ON b.station_key = t.end_station_key
+GROUP BY a.name, b.name
+ORDER BY trips DESC
+LIMIT 20"""},
+
+    "trip_riders": {
+        "label": "Member vs casual",
+        "note": "Two low-cardinality group keys over the whole table. The shares "
+                "themselves are parameters of the generator, so read this as a "
+                "pushdown demonstration and not as a finding about riders.",
+        "sql": """
+SELECT member_casual, rideable_type,
+       count(*)                 AS trips,
+       round(avg(duration_s))   AS avg_seconds,
+       round(avg(meters))       AS avg_meters,
+       round(100.0 * count(*) / sum(count(*)) OVER (), 1) AS pct
+FROM {S}.sim_trips
+GROUP BY 1, 2 ORDER BY trips DESC"""},
 }
 
 

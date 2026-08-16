@@ -125,6 +125,13 @@ tear it down.
 tab do exactly this, and exercise 7 is a blank page for your own. Understanding
 the failure mode is worth more than seeing the success case twice.
 
+**Generate trips.** GBFS has no trip feed, so there are no origin-destination
+pairs anywhere in modules 00–08. [Module 09](09-trips.md) builds a generator in
+the database that anchors departures to real observed deltas and models the rest
+— which gets you flow lines on the map and a four-relation join to push down.
+Everything it creates is labelled synthetic, and the module explains exactly
+which parts are measured.
+
 **Try a different city.** Point the two `url()` calls in
 `clickhouse/01-ingest-rmv.sql` at another system from
 [the registry](https://github.com/MobilityData/gbfs/blob/master/systems.csv) and

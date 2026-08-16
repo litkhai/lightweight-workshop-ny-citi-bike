@@ -115,6 +115,7 @@ docker compose up -d --build ui               # http://localhost:8080
 | 06 | [Push the counting down](workshop/06-pushdown.md) | 25 min | |
 | 07 | [The dashboard](workshop/07-dashboard.md) | 15 min | |
 | 08 | [Wrap-up and teardown](workshop/08-wrap-up.md) | 10 min | |
+| 09 | [Trips, generated](workshop/09-trips.md) — optional extra | 20 min | |
 
 Two modules are **console walkthroughs** rather than scripts. Creating cloud
 services and connecting a ClickPipe are tied to your own account and billing, so
@@ -131,6 +132,7 @@ sql/            01 schema · 02 verify · 03 the Postgres side of ingestion
                 03-check  can Postgres fetch https itself? (no, and why)
                 10 spatial · 20 aggregates · 30 snapshot-to-events
                 40 pg_clickhouse FDW
+                50 the trip generator (optional, module 09)
 setup.sh        asks for both services once and writes .env
 scripts/        preflight · psql · clickhouse (both containerised) · explain-pushdown
 ui/             the dashboard — two files, stdlib + psycopg

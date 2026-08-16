@@ -358,10 +358,13 @@ function initMap() {
         layers: [
           {id: 'bg', type: 'background', paint: {'background-color': '#101013'}},
           {id: 'osm', type: 'raster', source: 'osm', paint: {
-            'raster-opacity': 0.8,
-            'raster-saturation': -0.55,
-            'raster-brightness-max': 0.5,
-            'raster-contrast': -0.05,
+            // Dark enough that the data layers read as the foreground. The
+            // basemap is here for orientation — streets and water — not to be
+            // looked at.
+            'raster-opacity': 0.55,
+            'raster-saturation': -0.7,
+            'raster-brightness-max': 0.32,
+            'raster-contrast': -0.1,
           }},
         ],
       },
@@ -431,7 +434,14 @@ function drawMap(key, geojson) {
     if (MAP.getSource('geo')) MAP.removeSource('geo');
     MAP.addSource('geo', {type: 'geojson', data: geojson});
 
-    if (key === 'voronoi') {
+    if (key === 'flows') {
+      // Width and opacity by volume, so the busy pairs read through the pile.
+      MAP.addLayer({id: 'lyr-line', type: 'line', source: 'geo', paint: {
+        'line-color': '#faff69',
+        'line-width': ['interpolate', ['linear'], ['get', 'trips'], 2, 0.4, 60, 3.2],
+        'line-opacity': ['interpolate', ['linear'], ['get', 'trips'], 2, 0.18, 60, 0.8]},
+        layout: {'line-cap': 'round'}});
+    } else if (key === 'voronoi') {
       MAP.addLayer({id: 'lyr-fill', type: 'fill', source: 'geo', paint: {
         'fill-color': ['interpolate', ['linear'], ['get', 'km2'],
                        0, '#1d3b53', 0.15, '#2f6690', 0.6, '#faff69'],
@@ -464,7 +474,8 @@ function drawMap(key, geojson) {
 }
 
 function popup(e) {
-  const f = MAP.queryRenderedFeatures(e.point, {layers: ['lyr-pt', 'lyr-fill'].filter(l => MAP.getLayer(l))});
+  const f = MAP.queryRenderedFeatures(e.point,
+    {layers: ['lyr-pt', 'lyr-fill', 'lyr-line'].filter(l => MAP.getLayer(l))});
   if (!f.length) return;
   const p = f[0].properties;
   new maplibregl.Popup().setLngLat(e.lngLat).setHTML(
