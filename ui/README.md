@@ -11,7 +11,7 @@ bundle). The image is `python:3.12-slim` with `psycopg[binary]`.
 | Variable | Default | What it does |
 |---|---|---|
 | `LOCAL_SCHEMA` | `ny_citibike` | Where the geometry lives. Maps always read this |
-| `FOREIGN_SCHEMA` | *(empty)* | Where `sql/40-fdw-clickhouse.sql` imported the foreign tables. Set it and Statistics gains a side switch |
+| `FOREIGN_SCHEMA` | *(empty)* | Where `sql/40-fdw-clickhouse.sql` imported the foreign tables. Set it and it goes first in `search_path`, so unqualified queries start pushing down |
 | `UI_PORT` | `8080` | Listen port |
 | `STATEMENT_TIMEOUT_MS` | `120000` | Server-side ceiling on any one query |
 | `PG*` | from `.env` | Standard libpq variables |
@@ -26,12 +26,13 @@ thing this page could do.
 | Endpoint | Returns |
 |---|---|
 | `GET /api/catalog` | Query list and current FDW state |
-| `GET /api/overview` | Both halves: counts, size, lag, both schedulers, replication slot, FDW. Index work, safe to poll |
+| `GET /api/overview` | Counts, size, lag, the CDC and FDW hops, and the last pushed-down query. Index work, safe to poll |
 | `GET /api/map/<name>` | GeoJSON from PostGIS: `stations`, `voronoi`, `pressure`, `flows` |
-| `GET /api/agg/<name>` | One aggregate: `hourly`, `busiest`, `stranded`, `electric`, plus `trip_*` from module 09. `?side=auto\|local\|foreign` |
+| `GET /api/dashboard` | Every Overview chart in one round trip, each timed separately |
+| `GET /api/agg/<name>` | One aggregate: `hourly`, `busiest`, `stranded`, `electric`, plus `trip_*` from module 09 |
 | `GET /api/exercises` | The lab's preset exercises |
 | `GET /api/checks` | One pass/fail checkpoint per thing a module should have left behind |
-| `POST /api/run` | `{sql, side}` — arbitrary SQL, read only. `side` is `local`, `foreign` or `both` |
+| `POST /api/run` | `{sql, compare}` — arbitrary SQL, read only. `compare` re-runs it with the routing off |
 | `GET /api/log` | The session ring buffer and its totals |
 
 Every query response carries the SQL that ran, the elapsed time, the annotated
@@ -51,16 +52,19 @@ blocklist would be — it covers the statements nobody thought to ban, and it
 covers them inside CTEs and functions too. DDL never gets that far, because
 `EXPLAIN` only accepts `SELECT` and the DML statements.
 
-**`{S}` and `{L}` are substituted, not the schema name.** `{S}` is the schema
-under test and `{L}` is always local, so one query text can be sent to both
-sides in a single request and come back with two plans and two timings. That
-comparison is the whole lesson; either side alone is just a number.
+**There is no side to choose.** The connection sets
+`search_path = ny_citibike_ch, ny_citibike` when the FDW is ready, so an
+unqualified `FROM station_status` resolves to the foreign table and the planner
+routes the work to ClickHouse on its own. The badge reports that decision instead
+of echoing a button.
 
-The selector therefore picks a **schema**, not an engine, and the UI says so: it
-is labelled "read from" and the buttons carry schema names. Reading the foreign
-schema asks for remote data; whether the work goes remote stays the planner's
-call. When the two diverge the result card says so in red — that divergence is
-the subject, and exercise 3 provokes it deliberately.
+`{L}.` is the one substitution left, and only for the counter-example: it forces
+the real local table, which is how exercise 3 breaks the routing on purpose.
+`{S}.` is still accepted and simply drops out, so older query text keeps working.
+
+`compare` re-runs the identical text with the foreign schema removed from the
+path. An extra, not a precondition — the primary demonstration is that the first
+run pushed down without being asked.
 
 Results are capped at 500 rows on the way to the browser. The plan is the point.
 

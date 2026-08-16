@@ -35,6 +35,40 @@ nothing else it could have been — you did not touch the query, only which engi
 was asked. That is the whole reason this workshop insists on one name per
 namespace instead of `citibike` here and `default` there.
 
+## The prefix is a tool, not the destination
+
+Naming the schema is how you *force* a side, and the rest of this module does it
+on purpose so the two plans can be put next to each other. It is not how you are
+meant to work.
+
+The point of `pg_clickhouse` is that you connect to Postgres, write Postgres, and
+the heavy half leaves without being asked. `search_path` is what makes that true:
+
+```sql
+SET search_path = ny_citibike_ch, ny_citibike;
+
+-- No prefix. An ordinary Postgres query.
+SELECT st.name, count(*)
+FROM station_status ss
+JOIN stations st ON st.station_key = ss.station_key
+GROUP BY st.name;
+```
+
+`station_status` and `stations` resolve to the foreign tables because they come
+first, the planner sends the whole join to ClickHouse, and nothing in the query
+text says so. The dashboard's Statistics and Lab tabs run exactly this way — which
+is why they have no engine switch — and it is the shape you would use in an
+application.
+
+Keep both in your head:
+
+| | What it is for |
+|---|---|
+| `search_path` | how it actually works. Plain SQL, routed by the planner |
+| `ny_citibike_ch.` prefix | how you pin one side down to compare, or to prove a point |
+
+The rest of this module uses the prefix, because comparing needs it.
+
 !!! note "Why `_ch` and not just `ny_citibike`"
     The foreign tables live in Postgres too, and the real schema already owns
     the bare name. `ny_citibike_ch` is a local Postgres schema holding foreign

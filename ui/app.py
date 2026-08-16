@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 """A dashboard that shows which half of the system answered, and proves it.
 
-Three kinds of endpoint, matching the three things the page has to do:
-
-  /api/overview      Cheap state of both halves. Safe to poll.
+  /api/overview      Cheap state, plus the last query that went remote. Pollable.
+  /api/dashboard     Every Overview chart in one trip, each timed. On demand.
   /api/map/<name>    PostGIS. Geometry, so it cannot leave Postgres.
   /api/agg/<name>    Aggregates. The shape that pushes down to ClickHouse.
+  /api/checks        One pass/fail per thing a module should have left behind.
+  /api/exercises     The lab's presets.
+  POST /api/run      Arbitrary SQL, read only.
+  /api/log           The session ring buffer.
 
-Every response carries the SQL that ran, how long it took, and — for the
-aggregates — a verdict taken from the plan tree: whether the work was sent to
+Every query response carries the SQL that ran, how long it took, the annotated
+plan tree, and a verdict taken from that tree: whether the work was sent to
 ClickHouse or whether the rows were quietly dragged back here to be counted.
 
-That verdict is the point of the page. A dashboard that only shows numbers
-cannot tell you where they came from, and "it's fast" is not evidence that
-anything was pushed down.
+That verdict is the point of the page, and it is only worth anything because
+**nothing here lets you choose an engine.** Queries are written with no schema
+prefix and resolved through `search_path`, so the routing is the planner's
+decision and the badge is news rather than an echo. A switch used to sit on the
+Statistics tab; it made every answer a restatement of the button just pressed.
 
 Standard library only apart from psycopg, so the image stays small and there is
 no build step to explain.
@@ -263,20 +268,6 @@ def fdw_state(cur):
             "foreign_schemas": fschemas, "in_schema": in_schema,
             "local_schema": LOCAL_SCHEMA, "foreign_schema": FOREIGN_SCHEMA,
             "ready": bool(FOREIGN_SCHEMA and in_schema)}
-
-
-def pick_schema(side, state):
-    """Which schema answers the Statistics tab.
-
-    A request parameter rather than an environment variable, because the
-    interesting move is flipping between the two and watching the badge change.
-    A restart to see the other half of the point is a bad demo.
-    """
-    if side == "local" or not state["ready"]:
-        return LOCAL_SCHEMA, "local"
-    if side == "foreign":
-        return FOREIGN_SCHEMA, "foreign"
-    return FOREIGN_SCHEMA, "foreign"          # auto: prefer the claim being made
 
 
 # --------------------------------------------------------------------------- #

@@ -21,10 +21,10 @@ no build step, no bundle.
 
 | Tab | What it shows |
 |---|---|
-| **Overview** | Live state of the whole pipeline: station count, snapshots collected, what is docked right now, **both schedulers**, replication slot and lag, whether the FDW is configured |
+| **Overview** | Three headline numbers, the Postgres ↔ ClickHouse round trip with live state, and — on demand — six charts |
 | **Maps** | The three PostGIS queries as GeoJSON — stations sized by availability, Voronoi service areas, and where riders get stranded |
-| **Statistics** | The four aggregates, with a **Postgres / ClickHouse switch**, each badged with its plan verdict and its plan tree |
-| **Lab** | Your own SQL, run against either side or **both at once**. Seven exercises to start from |
+| **Statistics** | Seven aggregates written with no schema prefix, each badged with where the planner actually sent it, plus its plan tree |
+| **Lab** | Your own SQL, run as written. Seven exercises, and one checkbox to re-run with the routing off |
 | **Checks** | One pass/fail checkpoint per thing each module should have left behind |
 | **Log** | Every query the session ran, with elapsed time, rows returned, and how many rows crossed the wire |
 
@@ -32,18 +32,31 @@ Each tab is addressable — `http://localhost:8080/#lab` opens the lab directly.
 
 ## What to actually look at
 
-Open **Statistics** and flip the side switch back and forth on the same query.
+Open **Statistics** and read one query. There is no engine to pick — the SQL has
+**no schema prefix at all**:
 
-Two things change, and only one of them is the point:
+```sql
+SELECT extract(hour FROM polled_at)::int AS hour_utc, count(*), …
+FROM station_status
+GROUP BY 1
+```
 
-- the **badge** — `ran on Postgres` / `ran on ClickHouse`
-- the **row counts** — how many rows crossed the wire against how many the widest plan node handled
+That is an ordinary Postgres query. The connection's `search_path` is
+`ny_citibike_ch, ny_citibike`, so `station_status` resolves to the foreign table
+first, and the planner decides on its own to send the work to ClickHouse. The
+badge reports that decision; it is not a restatement of a button you pressed.
 
-That second pair is the argument. *A few hundred thousand rows handled here*
-versus *a handful fetched* says something a duration cannot. Expand **Remote
-SQL** to see the exact text that went to ClickHouse.
+There used to be a Postgres/ClickHouse switch here. It made the badge
+tautological — choose ClickHouse, be told it ran on ClickHouse — and it buried the
+actual claim, which is that **you connect to one database, write one dialect, and
+the heavy half goes elsewhere without being asked.**
 
-!!! warning "Those two numbers are estimates, and the page marks them `~`"
+Two things to read on each result:
+
+- the **badge** — `ran on ClickHouse` / `ran on Postgres`
+- the **Remote SQL** — the exact text that left, with the aggregation in it
+
+!!! warning "The row counts are estimates, and the page marks them `~`"
     They come from `EXPLAIN` without `ANALYZE`, so they are `Plan Rows` — the
     planner's guess. For a foreign scan the guess is the wrapper's flat default,
     which `pg_clickhouse` puts at **1000** however many rows actually cross. A
@@ -54,38 +67,45 @@ SQL** to see the exact text that went to ClickHouse.
     yourself — and notice that the dashboard does not, because that would mean
     executing every query twice.
 
-!!! tip "If the switch is not there"
-    The side switch only appears once `FOREIGN_SCHEMA` is set and foreign
-    tables exist. Before that the page says so plainly instead of showing a
-    disabled button, because "not configured yet" and "broken" should not look
-    the same. Set `FOREIGN_SCHEMA=ny_citibike_ch` in `.env` and
-    `docker compose up -d ui` again.
+!!! tip "Before module 06 the same queries say Postgres"
+    With no foreign tables, `search_path` is just `ny_citibike` and every verdict
+    comes back local. Nothing is broken and nothing is hidden — finish module 06,
+    set `FOREIGN_SCHEMA=ny_citibike_ch` in `.env`, `docker compose up -d ui`, and
+    the identical queries start reporting ClickHouse **without one character
+    changing**. That is the demonstration.
 
 ## The Lab — where you stop reading and start asking
 
 Open **Lab**. This is the tab that makes the dashboard an exercise rather than a
 demo: you write the SQL, and the page tells you where it ran.
 
-Two placeholders do the work:
+Write plain SQL. No prefix, no selector:
 
 ```sql
-{S}.station_status    -- the schema under test: local or foreign
-{L}.stations          -- always local
+SELECT count(*) FROM station_status;
 ```
 
-Because the schema is substituted rather than typed, the same text can go to
-**both sides in one request** — two plans, two timings, side by side. That
-comparison is the entire argument of this workshop, and it is the one thing a
-single number can never make.
+It pushes down, and the badge says so. One placeholder exists, and only for the
+counter-example:
+
+```sql
+{L}.stations    -- force the real local table, opting out of the routing
+```
+
+The checkbox beside **Run** re-runs the identical text with the foreign schema
+taken out of `search_path`, so you get both plans side by side when you want them
+— an extra, not a precondition. Measured on the same join: **146 ms** and a single
+`Foreign Scan` against **299 ms** and an eight-node plan with a 514,325-row hash
+join.
 
 The seven presets are the workshop's own "try this" list, made clickable:
 
 | | Exercise | The point |
 |---|---|---|
-| 1 | The simplest pushdown | whole table in, one row out — the easy case |
-| 2 | A join that stays remote | both tables replicated, so the join goes too |
+| 1 | Plain SQL, and it goes remote | no prefix, no choice — the planner routes it |
+| 2 | A join goes too | both tables replicated, so the join travels with them |
 | 3 | **Break it on purpose** | swap one table for `{L}` and watch the verdict flip |
-| 4 | Geometry cannot cross | `ST_DWithin` needs `geom`, which only exists locally |
+| 4 | Geometry cannot cross | `ST_DWithin` needs `geom`, and only the local table has it |
 | 5 | The window function that does not sort | the module-02 index covers it exactly |
 | 6 | Now uncover the index | change the ordering and a `Sort` node appears |
 | 7 | Your own query | anything you were curious about |

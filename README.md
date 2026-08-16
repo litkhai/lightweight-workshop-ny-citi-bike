@@ -178,12 +178,28 @@ ClickHouse Cloud 26.4.1:
 - ClickHouse fetching the live GBFS feed with `url()` — 1,073,635 bytes, parsed to 2,509 stations
 - a refreshable materialized view with `REFRESH EVERY 1 MINUTE APPEND` accumulating snapshots unattended
 - `pg_clickhouse` importing the landing tables and Postgres reading them
-- `pg_cron` syncing forward every minute: **22,581 rows over 9 snapshots with five consecutive successful runs and nothing running locally**
+- `pg_cron` syncing forward every minute, unattended for seven hours: **1.38M rows, 0 duplicate `(station_key, polled_at)` pairs**
 - the schema, the publication, and all five query files
+
+**Verified end to end on 2026-08-16**, same pair of services, with ClickPipes
+connected and module 09's generated trip table replicated:
+
+- **the pushdown, from the plan.** One query text, no schema prefix, resolved through `search_path`: a single `Foreign Scan` whose `Remote SQL` carries the join, the `GROUP BY` and the aggregates
+- **the counter-example.** The same text with one table pinned local — `dragged`, `Remote SQL` selecting columns only, no error and no warning
+- **timings that mean something**, over 9.8M trips: trips-by-hour **10,404 ms** local against **465 ms** pushed; a four-relation join 8,234 against 1,606
+- **the dialect translation** — `extract(hour FROM …)` leaving as `toHour(…)`
+- all ten dashboard checkpoints green
 
 **Verified on a local PostgreSQL 17 + PostGIS 3.6.4 container:** the plan shape
 of the window query — which turned out to be index-covered rather than sorting,
 so module 06 makes the narrower argument that survives scrutiny.
+
+**Three claims this repository made and measurement disproved**, all now
+corrected in place rather than quietly dropped:
+
+- `geom` does cross to ClickHouse. It arrives as `text`; `sql/40-fdw-clickhouse.sql` drops it from the foreign table afterwards so that reaching for it fails loudly instead of casting per row without an index
+- deriving departures from snapshot deltas **over**-counts, not under-counts — 244k/day implied against a published 100–150k, because reporting noise moves counts down as often as riders do
+- the dimension upsert rewrote all 2,509 stations every minute whether or not anything changed: 1,289,626 updates over 514 runs, on the table the workshop calls the half that barely changes
 
 **A negative result, verified and kept:** Postgres cannot fetch the feed
 itself. There is no `http` or `pg_net` extension in the catalogue; `plperlu`
@@ -192,12 +208,12 @@ installs cleanly but the server's Perl has no `IO::Socket::SSL` or
 that check on your own service, because it is the image rather than a
 permission and a platform update could change it.
 
-**Written from the product documentation, not yet run end to end:** modules
-[01](workshop/01-provision.md) (console provisioning),
-[05](workshop/05-clickpipes.md) (ClickPipes) and the pushdown verdicts in
-[06](workshop/06-pushdown.md). Those need a ClickPipe connected to your own
-services, and the console walkthroughs describe what to look for rather than
-quoting button labels that will drift.
+**Still written from the product documentation rather than run:** the console
+click-throughs in [01](workshop/01-provision.md) (provisioning) and
+[05](workshop/05-clickpipes.md) (creating the ClickPipe). The pipe itself has
+been connected and everything downstream of it measured — what is unverified is
+the sequence of screens, which is exactly the part that drifts. Both modules
+describe what you are looking for alongside the current labels.
 
 If a step does not match what you see, that is worth an
 [issue](https://github.com/litkhai/lightweight-workshop-ny-citi-bike/issues).
