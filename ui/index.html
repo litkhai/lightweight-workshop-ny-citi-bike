@@ -77,6 +77,10 @@ kbd{background:#2a2a32;border:1px solid var(--line);border-radius:4px;padding:1p
 .side h4 .hint{text-transform:none;letter-spacing:0;font-weight:400}
 /* The plan is the lesson, so 200 result rows must not push it below the fold. */
 .tblwrap{overflow:auto;max-height:320px;border:1px solid var(--line);border-radius:6px}
+.mismatch:not(:empty){background:#2a1d1d;border-left:2px solid var(--red);
+  padding:9px 12px;border-radius:0 6px 6px 0;margin:0 0 12px;font-size:12.5px;
+  color:var(--dim);max-width:82ch}
+.mismatch b{color:var(--red);font-weight:650}
 .goal{background:#1a1a1f;border-left:2px solid var(--yellow);padding:9px 12px;
   border-radius:0 6px 6px 0;margin:0 0 12px;font-size:12.5px;color:var(--dim);max-width:82ch}
 .goal b{color:var(--ink);font-weight:600}
@@ -156,13 +160,19 @@ a{color:var(--yellow)}
 <section class="tab" id="tab-lab">
   <p class="note">Write your own SQL and read the plan. <code>{S}</code> is the schema
     under test, <code>{L}</code> is always local — so the same text can be sent to both
-    sides at once, which is the only way to see one query produce two different plans.
+    at once, which is the only way to see one query produce two different plans.
     The transaction is <b>read only</b>, so nothing you type here can damage the workshop.</p>
+  <p class="note"><b>You are choosing a schema, not an engine.</b> Reading the foreign
+    schema asks for remote <i>data</i>; whether the <i>work</i> goes remote is the
+    planner's decision, and the badge below reports what it decided. When the two
+    disagree — you read the foreign tables and Postgres did the counting anyway —
+    that is not a bug in the page. It is the thing this workshop is about, and
+    exercise 3 causes it on purpose.</p>
   <div class="pills" id="exPills"></div>
   <div class="goal" id="exGoal"></div>
   <textarea id="labSql" spellcheck="false"></textarea>
   <div class="labbar">
-    <span class="hint">run on</span>
+    <span class="hint">read from</span>
     <div class="pills" id="labSides" style="margin:0"></div>
     <button class="go" id="labRun">Run</button>
     <span class="hint"><kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Enter</kbd></span>
@@ -537,8 +547,9 @@ async function labRun() {
     if (d.error) throw new Error(d.error);
     $('#labOut').className = 'sides' + (d.results.length > 1 ? ' two' : '');
     $('#labOut').innerHTML = d.results.map(r => {
-      const head = `<h4>${r.side === 'foreign' ? 'ClickHouse' : 'Postgres'}
-                    <span class="hint">${esc(r.schema)}</span></h4>`;
+      const head = `<h4>${esc(r.schema)}
+                    <span class="hint">${r.side === 'foreign'
+                      ? 'foreign tables' : 'local tables'}</span></h4>`;
       if (r.error) return `<div class="card side">${head}
         <p class="err">${esc(r.error)}</p>
         <details><summary>SQL</summary><pre>${esc(r.sql)}</pre></details></div>`;
@@ -546,6 +557,7 @@ async function labRun() {
       // the plan says how — and that is what the exercises are actually about.
       return `<div class="card side">${head}
         <div class="verdict" data-v="${r.side}"></div>
+        <div class="mismatch" data-m="${r.side}"></div>
         <details open><summary>Plan tree</summary><div class="plan" data-p="${r.side}"></div></details>
         <details><summary>Remote SQL</summary><pre>${
           esc(r.ran.remote_sql || '(nothing was sent remotely)')}</pre></details>
@@ -556,9 +568,23 @@ async function labRun() {
     d.results.filter(r => !r.error).forEach(r => {
       verdict($(`.verdict[data-v="${r.side}"]`), r.ran, `${r.ms} ms`);
       planTree($(`.plan[data-p="${r.side}"]`), r.ran.nodes, r.ran.rows_estimated);
+      // You chose a schema; the planner chose an engine. When those disagree,
+      // that disagreement IS the lesson — so it gets said out loud instead of
+      // being left for the reader to infer from a badge they may not read.
+      const el = $(`.mismatch[data-m="${r.side}"]`);
+      if (r.side === 'foreign' && r.ran.verdict !== 'pushed') {
+        el.innerHTML = `<b>You read the foreign tables and ClickHouse did not do the work.</b>
+          Nothing errored and nothing warned. Choosing the remote schema asks for
+          remote data, not remote execution — the planner still decides, and here it
+          decided to bring the rows here. Look at the plan for the reason.`;
+      } else if (r.side === 'local' && r.ran.verdict === 'pushed') {
+        el.innerHTML = `<b>Read locally, yet the work went remote.</b> Worth a look at
+          the plan — this usually means a foreign table is reachable under the name
+          you used.`;
+      }
     });
     $('#labStatus').textContent = d.results.map(r =>
-      `${r.side === 'foreign' ? 'ClickHouse' : 'Postgres'} ${r.error ? 'failed' : r.ms + ' ms'}`
+      `${r.schema} ${r.error ? 'failed' : r.ms + ' ms'}`
     ).join(' · ');
   } catch (e) {
     $('#labOut').innerHTML = `<p class="err">${esc(e.message)}</p>`;
@@ -596,9 +622,9 @@ async function loadLab() {
 
   const ready = CATALOG.fdw.ready;
   $('#labSides').innerHTML =
-    `<button data-s="local">Postgres</button>`
-    + (ready ? `<button data-s="foreign">ClickHouse</button>
-                <button data-s="both">Both, side by side</button>` : '');
+    `<button data-s="local">${esc(EX.local_schema)}</button>`
+    + (ready ? `<button data-s="foreign">${esc(EX.foreign_schema)}</button>
+                <button data-s="both">both, side by side</button>` : '');
   document.querySelectorAll('#labSides button').forEach(b =>
     b.onclick = () => setSide(b.dataset.s));
   if (!ready) $('#labStatus').textContent =
