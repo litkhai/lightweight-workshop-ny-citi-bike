@@ -1074,17 +1074,27 @@ class Handler(BaseHTTPRequestHandler):
                 WHERE polled_at = (SELECT max(polled_at) FROM {LOCAL_SCHEMA}.station_status)""")
             snap = cur.fetchone()
 
-            # Replication and the FDW are what make the second half real, so
-            # the page reports whether they are actually running.
+            # Replication, scoped to this workshop.
+            #
+            # The old version aggregated pg_publication_tables with no WHERE, so
+            # the card listed every publication on the server: another project's
+            # tables, and ours twice over because two publications name them. It
+            # also labelled a boolean `active` as "slot". None of that describes
+            # the pipeline, which is the one thing this card is for.
             cur.execute("""
-                SELECT coalesce((SELECT state FROM pg_stat_replication LIMIT 1), 'not connected'),
-                       coalesce((SELECT active::text FROM pg_replication_slots LIMIT 1), 'no slot'),
-                       coalesce((SELECT pg_size_pretty(pg_wal_lsn_diff(
-                            pg_current_wal_lsn(), confirmed_flush_lsn))
-                          FROM pg_replication_slots LIMIT 1), '-'),
-                       coalesce((SELECT string_agg(schemaname||'.'||tablename, ', ')
-                          FROM pg_publication_tables), 'none')""")
-            (cdc_state, slot_active, unconsumed, published) = cur.fetchone()
+                SELECT (SELECT count(*) FROM pg_publication_tables
+                         WHERE pubname = 'ny_citibike_pub'),
+                       coalesce((SELECT string_agg(tablename, ', ' ORDER BY tablename)
+                          FROM pg_publication_tables
+                         WHERE pubname = 'ny_citibike_pub'), ''),
+                       (SELECT count(*) FROM pg_replication_slots),
+                       (SELECT count(*) FROM pg_replication_slots WHERE NOT active),
+                       coalesce((SELECT pg_size_pretty(sum(pg_wal_lsn_diff(
+                            pg_current_wal_lsn(), confirmed_flush_lsn)))
+                          FROM pg_replication_slots), '-'),
+                       coalesce((SELECT string_agg(DISTINCT state, ', ')
+                          FROM pg_stat_replication), 'not connected')""")
+            (pub_n, pub_tables, slots, slots_idle, unconsumed, cdc_state) = cur.fetchone()
             state = fdw_state(cur)
 
             # Pillar three, made visible. The two schedulers are the only part
@@ -1100,8 +1110,12 @@ class Handler(BaseHTTPRequestHandler):
                         "landing_newest": None, "landing_lag": None, "error": None}
             try:
                 cur.execute("""
-                    SELECT coalesce((SELECT jobname || ' · ' || schedule FROM cron.job
-                                      WHERE jobname = 'ny_citibike-sync'), 'no job'),
+                    SELECT coalesce((SELECT jobname ||
+                                        CASE WHEN schedule = '* * * * *'
+                                             THEN ', every minute'
+                                             ELSE ', ' || schedule END
+                                      FROM cron.job
+                                     WHERE jobname = 'ny_citibike-sync'), 'no job'),
                            coalesce((SELECT d.status || ' at ' || to_char(d.start_time,'HH24:MI:SS')
                                        FROM cron.job_run_details d JOIN cron.job j USING (jobid)
                                       WHERE j.jobname = 'ny_citibike-sync'
@@ -1134,8 +1148,9 @@ class Handler(BaseHTTPRequestHandler):
                          "last_poll": last_poll, "behind_seconds": behind},
             "snapshot": {"stations": snap[0], "bikes": snap[1],
                          "ebikes": snap[2], "docks": snap[3]},
-            "cdc": {"state": cdc_state, "slot_active": slot_active,
-                    "unconsumed": unconsumed, "published": published},
+            "cdc": {"state": cdc_state, "slots": slots, "slots_idle": slots_idle,
+                    "unconsumed": unconsumed, "publication": "ny_citibike_pub",
+                    "pub_tables": pub_n, "pub_list": pub_tables},
             "fdw": state}))
 
     def _map(self, name):

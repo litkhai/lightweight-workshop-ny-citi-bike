@@ -125,6 +125,25 @@ kbd{background:#2a2a32;border:1px solid var(--line);border-radius:4px;padding:1p
   font-size:11.5px;color:var(--ink);box-shadow:0 4px 14px #0008;max-width:260px}
 #tt b{color:var(--yellow);font-weight:650}
 .kpi .big{font-size:24px}
+/* The chain, in the order the data moves. One card, four hops, each with a
+   state colour — so "is replication running" is answerable at a glance instead
+   of by reading a wrapped list of table names. */
+#ovPipe h3{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+#ovPipe h3 .meta{text-transform:none;letter-spacing:0;font-weight:400;color:var(--dim)}
+.hops{display:flex;flex-direction:column;gap:1px;background:var(--line);
+  border-radius:6px;overflow:hidden;margin-top:4px}
+.hop{display:grid;grid-template-columns:22px minmax(230px,auto) 1fr;gap:12px;
+  align-items:baseline;background:var(--panel);padding:9px 12px;font-size:12.5px}
+@media(max-width:760px){.hop{grid-template-columns:22px 1fr}.hop .det{grid-column:2}}
+.hop .n{color:var(--dim);font-variant-numeric:tabular-nums;
+  border-left:2px solid var(--axis,#3a3a44);padding-left:7px}
+.hop.ok   .n{border-left-color:var(--green)}
+.hop.warn .n{border-left-color:var(--yellow)}
+.hop.bad  .n{border-left-color:var(--red)}
+.hop .what{color:var(--ink)}
+.hop .what code{color:var(--dim);font-size:11.5px}
+.hop .det{color:var(--dim)}
+.hop.bad .det{color:var(--red)}
 .kpi .spark{margin-top:6px}
 
 /* ---- plan tree ---------------------------------------------------------- */
@@ -176,6 +195,7 @@ a{color:var(--yellow)}
 
 <section class="tab on" id="tab-over">
   <div class="grid" id="ovCards"><p class="spin">loading…</p></div>
+  <div class="card" id="ovPipe" style="margin-top:14px"></div>
   <div class="labbar" style="margin:18px 0 0">
     <button class="go" id="dashRun">Load charts</button>
     <span class="hint" id="dashStatus">Not loaded — these read the whole fact table,
@@ -518,6 +538,21 @@ async function loadOverview() {
     const fdw = d.fdw.ready
       ? `<span class="badge b-ch">ready</span>`
       : `<span class="badge b-none">not configured</span>`;
+    // Three headline numbers, then ONE card for the pipeline.
+    //
+    // There were four status cards and they competed rather than explained: a
+    // boolean labelled "slot", a wrapping dump of every publication on the
+    // server including another project's, and version strings given the same
+    // weight as whether replication was running. The chain is one thing, so it
+    // gets one card, in the order the data actually moves.
+    const hop = (n, name, detail, state) =>
+      `<div class="hop ${state}"><span class="n">${n}</span>
+         <span class="what">${name}</span>
+         <span class="det">${detail}</span></div>`;
+    const lag = d.pipeline.landing_lag;
+    const cdc = d.cdc;
+    const idle = cdc.slots_idle > 0;
+
     $('#ovCards').innerHTML = `
       <div class="card"><h3>Stations (PostGIS)</h3>
         <div class="big">${fmt(d.postgres.stations)}</div>
@@ -530,30 +565,38 @@ async function loadOverview() {
       <div class="card"><h3>Right now</h3>
         <div class="big">${fmt(d.snapshot.bikes)}<span class="unit">bikes docked</span></div>
         <div class="row"><span>e-bikes</span><span>${fmt(d.snapshot.ebikes)}</span></div>
-        <div class="row"><span>free docks</span><span>${fmt(d.snapshot.docks)}</span></div></div>
-      <div class="card"><h3>Ingestion (two schedulers)</h3>
-        <div class="row"><span>ClickHouse landing</span><span>${
-          d.pipeline.landing_lag === null ? 'not reachable'
-            : `${d.pipeline.landing_newest} · ${d.pipeline.landing_lag}s old`}</span></div>
-        <div class="row"><span>pg_cron</span><span>${d.pipeline.cron}</span></div>
-        <div class="row"><span>last run</span><span>${d.pipeline.cron_last}</span></div>
-        <div class="row"><span>failed runs</span><span>${
-          d.pipeline.cron_failures === null ? '–' : d.pipeline.cron_failures}</span></div>
-        ${d.pipeline.error ? `<div class="row"><span class="err" style="white-space:normal">${
-          esc(d.pipeline.error)}</span></div>` : ''}</div>
-      <div class="card"><h3>Replication → ClickHouse</h3>
-        <div class="row"><span>slot</span><span>${d.cdc.slot_active}</span></div>
-        <div class="row"><span>state</span><span>${d.cdc.state}</span></div>
-        <div class="row"><span>unconsumed WAL</span><span>${d.cdc.unconsumed}</span></div>
-        <div class="row"><span>published</span><span>${d.cdc.published}</span></div></div>
-      <div class="card"><h3>pg_clickhouse (FDW)</h3>
-        <div style="margin:6px 0 8px">${fdw}</div>
-        <div class="row"><span>extension</span><span>${d.fdw.extension ? 'installed' : 'no'}</span></div>
-        <div class="row"><span>foreign tables</span><span>${d.fdw.foreign_tables}</span></div>
-        <div class="row"><span>schema</span><span>${d.fdw.foreign_schemas || '–'}</span></div></div>
-      <div class="card"><h3>Server</h3>
-        <div class="row"><span>PostgreSQL</span><span>${d.postgres.version}</span></div>
-        <div class="row"><span>PostGIS</span><span>${d.postgres.postgis}</span></div></div>`;
+        <div class="row"><span>free docks</span><span>${fmt(d.snapshot.docks)}</span></div></div>`;
+
+    $('#ovPipe').innerHTML = `
+      <h3>The pipeline<span class="meta">${esc(d.postgres.version)} ·
+        PostGIS ${esc(d.postgres.postgis)}</span></h3>
+      <div class="hops">
+        ${hop(1, 'GBFS → ClickHouse <code>ny_citibike</code>',
+              lag === null ? 'landing table not reachable'
+                : `refreshable MV · newest ${d.pipeline.landing_newest} (${lag}s old)`,
+              lag === null ? 'bad' : lag < 300 ? 'ok' : 'warn')}
+        ${hop(2, 'ClickHouse → Postgres <code>ny_citibike</code>',
+              `${esc(d.pipeline.cron)} · ${esc(d.pipeline.cron_last)}`
+              + (d.pipeline.cron_failures ? ` · ${d.pipeline.cron_failures} failed`
+                                          : ' · no failures'),
+              d.pipeline.cron === 'no job' ? 'bad'
+                : d.pipeline.cron_failures ? 'warn' : 'ok')}
+        ${hop(3, 'Postgres → ClickHouse <code>ny_citibike</code>',
+              cdc.pub_tables
+                ? `ClickPipes CDC · ${esc(cdc.publication)} publishes ${esc(cdc.pub_list)}`
+                  + ` · ${esc(cdc.state)} · ${esc(cdc.unconsumed)} unconsumed WAL`
+                  + (idle ? ` · ${cdc.slots_idle} INACTIVE slot retaining WAL` : '')
+                : 'publication is empty — run sql/01-schema.sql',
+              !cdc.pub_tables ? 'bad' : idle ? 'bad'
+                : cdc.state === 'not connected' ? 'warn' : 'ok')}
+        ${hop(4, 'ClickHouse → Postgres <code>ny_citibike_ch</code>',
+              d.fdw.ready
+                ? `pg_clickhouse · ${d.fdw.in_schema} foreign tables · unqualified`
+                  + ` queries reach these first, so they push down`
+                : 'no foreign tables yet — module 06 imports them',
+              d.fdw.ready ? 'ok' : 'warn')}
+      </div>`;
+
     $('#hdr').textContent = `${fmt(d.postgres.stations)} stations · `
       + `${fmt(d.postgres.rows_estimate)} snapshots · updated ${fresh}`;
   } catch (e) {
