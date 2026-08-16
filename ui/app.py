@@ -1097,52 +1097,15 @@ class Handler(BaseHTTPRequestHandler):
             (pub_n, pub_tables, slots, slots_idle, unconsumed, cdc_state) = cur.fetchone()
             state = fdw_state(cur)
 
-            # Pillar three, made visible. The two schedulers are the only part
-            # of the pipeline with nothing on your laptop to look at, so if the
-            # page does not report them there is nowhere to look at all.
-            # "unknown", not "no job". A failing query and an absent job are
-            # different facts, and defaulting to the latter hid a real bug here
-            # for exactly as long as it took to run it against pg_cron: the
-            # query said `WHERE jobname` on cron.job_run_details, which keys on
-            # jobid and has no jobname column. The page cheerfully reported "no
-            # job" about a job that was running fine.
-            pipeline = {"cron": "unknown", "cron_last": "-", "cron_failures": None,
-                        "landing_newest": None, "landing_lag": None, "error": None}
-            try:
-                cur.execute("""
-                    SELECT coalesce((SELECT jobname ||
-                                        CASE WHEN schedule = '* * * * *'
-                                             THEN ', every minute'
-                                             ELSE ', ' || schedule END
-                                      FROM cron.job
-                                     WHERE jobname = 'ny_citibike-sync'), 'no job'),
-                           coalesce((SELECT d.status || ' at ' || to_char(d.start_time,'HH24:MI:SS')
-                                       FROM cron.job_run_details d JOIN cron.job j USING (jobid)
-                                      WHERE j.jobname = 'ny_citibike-sync'
-                                      ORDER BY d.runid DESC LIMIT 1), 'not yet'),
-                           (SELECT count(*) FROM cron.job_run_details d
-                              JOIN cron.job j USING (jobid)
-                             WHERE j.jobname = 'ny_citibike-sync'
-                               AND d.status <> 'succeeded')""")
-                pipeline["cron"], pipeline["cron_last"], pipeline["cron_failures"] = cur.fetchone()
-            except Exception as exc:                               # noqa: BLE001
-                conn.rollback()
-                pipeline["error"] = f"{type(exc).__name__}: {str(exc).splitlines()[0]}"
-
-            # How far behind ClickHouse's landing table Postgres is. This is the
-            # pg_cron half of the lag on its own, which is the number people
-            # actually want when they ask why the dashboard is two minutes old.
-            try:
-                cur.execute("""
-                    SELECT to_char(max(polled_at), 'HH24:MI:SS'),
-                           extract(epoch FROM now() - max(polled_at))::int
-                      FROM ny_citibike_ch.gbfs_status""")
-                pipeline["landing_newest"], pipeline["landing_lag"] = cur.fetchone()
-            except Exception:                                      # noqa: BLE001
-                conn.rollback()
+            # Deliberately absent: the two ingestion schedulers.
+            #
+            # They are how the data arrives, not what this workshop is about — and
+            # the landing-freshness probe crossed the FDW to ClickHouse on every
+            # 30-second poll to report it. "Is data arriving" is already answered
+            # by `last poll` on the snapshots tile, and module 03's health has a
+            # proper home in the Checks tab.
 
         self._send(200, json.dumps({
-            "pipeline": pipeline,
             "postgres": {"version": pgver, "postgis": gisver, "stations": stations,
                          "rows_estimate": rows_est, "size": size,
                          "last_poll": last_poll, "behind_seconds": behind},

@@ -545,11 +545,10 @@ async function loadOverview() {
     // server including another project's, and version strings given the same
     // weight as whether replication was running. The chain is one thing, so it
     // gets one card, in the order the data actually moves.
-    const hop = (n, name, detail, state) =>
-      `<div class="hop ${state}"><span class="n">${n}</span>
+    const hop = (arrow, name, detail, state) =>
+      `<div class="hop ${state}"><span class="n">${arrow}</span>
          <span class="what">${name}</span>
          <span class="det">${detail}</span></div>`;
-    const lag = d.pipeline.landing_lag;
     const cdc = d.cdc;
     const idle = cdc.slots_idle > 0;
 
@@ -567,32 +566,30 @@ async function loadOverview() {
         <div class="row"><span>e-bikes</span><span>${fmt(d.snapshot.ebikes)}</span></div>
         <div class="row"><span>free docks</span><span>${fmt(d.snapshot.docks)}</span></div></div>`;
 
+    // Only the round trip this workshop is about.
+    //
+    // The GBFS pull and the pg_cron copy-forward used to be hops 1 and 2 here.
+    // They are how the data got in, which is scaffolding — the subject is what
+    // happens between the two engines once it has. "Is data arriving" is the
+    // `last poll` line on the tile above.
     $('#ovPipe').innerHTML = `
-      <h3>The pipeline<span class="meta">${esc(d.postgres.version)} ·
+      <h3>Postgres ↔ ClickHouse<span class="meta">${esc(d.postgres.version)} ·
         PostGIS ${esc(d.postgres.postgis)}</span></h3>
       <div class="hops">
-        ${hop(1, 'GBFS → ClickHouse <code>ny_citibike</code>',
-              lag === null ? 'landing table not reachable'
-                : `refreshable MV · newest ${d.pipeline.landing_newest} (${lag}s old)`,
-              lag === null ? 'bad' : lag < 300 ? 'ok' : 'warn')}
-        ${hop(2, 'ClickHouse → Postgres <code>ny_citibike</code>',
-              `${esc(d.pipeline.cron)} · ${esc(d.pipeline.cron_last)}`
-              + (d.pipeline.cron_failures ? ` · ${d.pipeline.cron_failures} failed`
-                                          : ' · no failures'),
-              d.pipeline.cron === 'no job' ? 'bad'
-                : d.pipeline.cron_failures ? 'warn' : 'ok')}
-        ${hop(3, 'Postgres → ClickHouse <code>ny_citibike</code>',
+        ${hop('→', 'Postgres <code>ny_citibike</code> → ClickHouse',
               cdc.pub_tables
-                ? `ClickPipes CDC · ${esc(cdc.publication)} publishes ${esc(cdc.pub_list)}`
-                  + ` · ${esc(cdc.state)} · ${esc(cdc.unconsumed)} unconsumed WAL`
-                  + (idle ? ` · ${cdc.slots_idle} INACTIVE slot retaining WAL` : '')
+                ? `ClickPipes CDC · <code>${esc(cdc.publication)}</code> carries `
+                  + `${esc(cdc.pub_list)} · ${esc(cdc.state)} · `
+                  + `${esc(cdc.unconsumed)} unconsumed WAL`
+                  + (idle ? ` · ${cdc.slots_idle} INACTIVE slot retaining WAL`
+                          : ` · ${cdc.slots} slot${cdc.slots === 1 ? '' : 's'}, all active`)
                 : 'publication is empty — run sql/01-schema.sql',
-              !cdc.pub_tables ? 'bad' : idle ? 'bad'
+              !cdc.pub_tables || idle ? 'bad'
                 : cdc.state === 'not connected' ? 'warn' : 'ok')}
-        ${hop(4, 'ClickHouse → Postgres <code>ny_citibike_ch</code>',
+        ${hop('←', 'ClickHouse → Postgres <code>ny_citibike_ch</code>',
               d.fdw.ready
-                ? `pg_clickhouse · ${d.fdw.in_schema} foreign tables · unqualified`
-                  + ` queries reach these first, so they push down`
+                ? `pg_clickhouse · ${d.fdw.in_schema} foreign tables · an unqualified `
+                  + `query reaches these before the real ones, so it pushes down`
                 : 'no foreign tables yet — module 06 imports them',
               d.fdw.ready ? 'ok' : 'warn')}
       </div>`;
