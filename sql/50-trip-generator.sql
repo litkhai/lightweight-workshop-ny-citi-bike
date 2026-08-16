@@ -552,12 +552,13 @@ SELECT cron.schedule('ny_citibike-simtrips', '* * * * *',
 -- Build the pool now; leave the backfill to you
 -- --------------------------------------------------------------------------
 --
--- The pool is small and instant. The backfill is not: 90 days at the default
--- rate is roughly 10.8M rows, a few gigabytes of WAL, and every one of them
--- replicates through ClickPipes. Run it deliberately:
+-- The pool is small and instant. The backfill is not. Measured: 11,000 rows per
+-- second, and 259 bytes each once the three indexes are counted — so 90 days is
+-- about 9.4M rows, 2.4 GB, a quarter of an hour, and all of it replicates
+-- through ClickPipes. Run it deliberately:
 --
---   CALL ny_citibike.sim_backfill(90);          -- ~10.8M rows, minutes
---   CALL ny_citibike.sim_backfill(7, 20000);    -- ~140k rows, seconds
+--   CALL ny_citibike.sim_backfill(90);          -- ~9.4M rows, ~15 min, 2.4 GB
+--   CALL ny_citibike.sim_backfill(7, 20000);    -- ~100k rows, seconds
 --
 CALL ny_citibike.sim_build_pool();
 CALL ny_citibike.sim_generate_observed();

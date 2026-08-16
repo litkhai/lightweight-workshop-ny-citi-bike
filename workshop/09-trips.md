@@ -139,9 +139,10 @@ CALL ny_citibike.sim_backfill(7, 20000);    -- ~100k rows, seconds
 Measured: 312,041 rows in 32 seconds, so roughly 11,000 rows/second.
 
 !!! warning "This is the most expensive thing in the workshop"
-    Ninety days is around 9.4M rows, a gigabyte of table plus WAL, and every row
-    replicates through ClickPipes. Run the small version first if you only want
-    to see it work.
+    Measured at 4.4M rows in: **259 bytes each**, table plus its three indexes.
+    Ninety days is therefore around 9.4M rows and **2.4 GB** — not the gigabyte
+    a back-of-envelope on row width suggests — and every row replicates through
+    ClickPipes. Run the small version first if you only want to see it work.
 
     The procedure commits once per day rather than once overall, so replication
     drains while it runs and a cancelled backfill keeps what it already wrote.
