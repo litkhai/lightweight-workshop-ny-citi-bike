@@ -62,9 +62,14 @@ cannot be rushed; the rest is copy-paste.
 
 Data volume grows while you work. By module 06 you will have tens of thousands
 of rows — enough to see the plans differ, not enough to see Postgres struggle.
-If you want timings that mean something, leave the pg_cron job running overnight
-and come back: at 3.6M rows a day the aggregates in module 06 get slow enough
-locally that the comparison stops being academic.
+That is why every verdict in this workshop is read from the plan: at this size
+the clock cannot tell you anything.
+
+Two ways to get timings that do mean something. Leave the pg_cron job running
+overnight and come back to 3.6M rows. Or run the optional
+[module 09](09-trips.md), whose generated trip table reaches ten million rows in
+a quarter of an hour — where the same aggregate takes 12 seconds locally against
+0.17 for the small one, and the badge and the stopwatch finally agree.
 
 ## What you will be able to say afterwards
 

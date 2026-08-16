@@ -194,10 +194,25 @@ Measured: 312,041 rows in 32 seconds, so roughly 11,000 rows/second.
 geometries, so it is another operation that cannot leave Postgres, and a more
 convincing one than a Voronoi diagram.
 
-**A much bigger table to push down.** Statistics gains three aggregates over
-`sim_trips`, including **Busiest routes** — a self-join on the trip table plus
-two joins to `stations`. Four relations, and when the schema is the foreign one
-all four go remote. It is the clearest pushdown in the workshop.
+**A much bigger table to push down**, and for the first time one where the clock
+is evidence rather than decoration. Measured on Managed Postgres with 9.8M trips
+in, all three running locally:
+
+| Aggregate | Rows at the widest node | Local |
+|---|---|---|
+| Trips by hour | 9.8M | **12.2 s** |
+| Busiest routes — 4 relations | 9.8M | **9.8 s** |
+| Member vs casual | 4.1M | 1.6 s |
+| *Fleet by hour, over `station_status`* | *650k* | *0.17 s* |
+
+That last row is the point of the table. Everything in modules 00–08 answers in
+milliseconds because the fact table is small; the workshop had to argue from the
+plan alone. At ten million rows a wrong routing decision costs twelve seconds,
+and the badge and the stopwatch finally agree.
+
+**Busiest routes** is the one to run: a self-join on the trip table plus two joins
+to `stations`. Four relations, and when the schema is the foreign one all four go
+remote.
 
 **A second scheduler.** `ny_citibike-simtrips` runs every minute alongside
 `ny_citibike-sync`, so the trip table keeps growing on the same terms as
