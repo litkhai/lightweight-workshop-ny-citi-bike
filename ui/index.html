@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NY Citi Bike — PostGIS + ClickHouse</title>
+<!-- Inline SVG favicon: no extra request, no binary asset, and it scales. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23151517'/%3E%3Cg fill='none' stroke='%23faff69' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='9' cy='21' r='5'/%3E%3Ccircle cx='23' cy='21' r='5'/%3E%3Cpath d='M9 21l5-9h5l4 9M14 12l-2-4H9m5 13h5'/%3E%3C/g%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <style>
@@ -85,6 +87,46 @@ kbd{background:#2a2a32;border:1px solid var(--line);border-radius:4px;padding:1p
   border-radius:0 6px 6px 0;margin:0 0 12px;font-size:12.5px;color:var(--dim);max-width:82ch}
 .goal b{color:var(--ink);font-weight:600}
 
+/* ---- dashboard panels & charts ------------------------------------------ */
+/* Series colours are the validated categorical slots 1 and 2 for a dark
+   surface. Checked with the palette validator against #1f1f24: CVD ΔE 26.8,
+   normal-vision ΔE 31.8, both well over their floors. Yellow is NOT used for
+   data — it is reserved for the "ran on ClickHouse" badge, and a hue that means
+   two things means neither. */
+.viz{--s1:#3987e5;--s2:#d95926;--axis:#3a3a44;--tick:#7d7d88}
+.dash{display:grid;gap:14px;grid-template-columns:repeat(12,1fr);margin-top:14px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  padding:14px;min-width:0;grid-column:span 12}
+@media(min-width:900px){
+  .panel.w4{grid-column:span 4}.panel.w6{grid-column:span 6}
+  .panel.w8{grid-column:span 8}.panel.w12{grid-column:span 12}
+}
+.panel h3{margin:0 0 2px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--dim);font-weight:600;display:flex;justify-content:space-between;gap:10px}
+.panel h3 .meta{text-transform:none;letter-spacing:0;font-weight:400;
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+.panel .pnote{color:var(--dim);font-size:11.5px;margin:0 0 10px;line-height:1.45}
+.chart{width:100%;display:block;overflow:visible}
+.chart text{fill:var(--tick);font-size:9.5px;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.chart .glab{fill:var(--dim);font-size:9px}
+.chart .dlab{fill:var(--ink);font-size:9.5px;font-variant-numeric:tabular-nums}
+.chart .grid{stroke:var(--axis);stroke-width:1;shape-rendering:crispEdges}
+.chart .base{stroke:var(--axis);stroke-width:1;shape-rendering:crispEdges}
+.chart .mark{cursor:pointer}
+.chart .mark:hover{filter:brightness(1.25)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin:0 0 8px;font-size:11.5px;
+  color:var(--dim)}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;
+  margin-right:5px;vertical-align:-1px}
+/* One tooltip for the whole page, moved rather than recreated. */
+#tt{position:fixed;z-index:50;pointer-events:none;opacity:0;transition:opacity .08s;
+  background:#101013;border:1px solid var(--line);border-radius:6px;padding:6px 9px;
+  font-size:11.5px;color:var(--ink);box-shadow:0 4px 14px #0008;max-width:260px}
+#tt b{color:var(--yellow);font-weight:650}
+.kpi .big{font-size:24px}
+.kpi .spark{margin-top:6px}
+
 /* ---- plan tree ---------------------------------------------------------- */
 .plan{font-family:"SFMono-Regular",Consolas,monospace;font-size:12px;
   background:#101013;border:1px solid var(--line);border-radius:6px;padding:10px;
@@ -134,6 +176,12 @@ a{color:var(--yellow)}
 
 <section class="tab on" id="tab-over">
   <div class="grid" id="ovCards"><p class="spin">loading…</p></div>
+  <div class="labbar" style="margin:18px 0 0">
+    <button class="go" id="dashRun">Load charts</button>
+    <span class="hint" id="dashStatus">Not loaded — these read the whole fact table,
+      so they are on demand rather than on a timer.</span>
+  </div>
+  <div class="dash viz" id="dashGrid"></div>
 </section>
 
 <section class="tab" id="tab-maps">
@@ -147,7 +195,7 @@ a{color:var(--yellow)}
 
 <section class="tab" id="tab-stats">
   <div class="pills" id="aggPills"></div>
-  <div class="pills" id="sidePills"></div>
+  <p class="note" id="sideNote" style="margin:0 0 12px"></p>
   <p class="note" id="aggNote"></p>
   <div class="verdict" id="aggVerdict"></div>
   <div style="overflow:auto"><table id="aggTable"></table></div>
@@ -158,23 +206,21 @@ a{color:var(--yellow)}
 </section>
 
 <section class="tab" id="tab-lab">
-  <p class="note">Write your own SQL and read the plan. <code>{S}</code> is the schema
-    under test, <code>{L}</code> is always local — so the same text can be sent to both
-    at once, which is the only way to see one query produce two different plans.
-    The transaction is <b>read only</b>, so nothing you type here can damage the workshop.</p>
-  <p class="note"><b>You are choosing a schema, not an engine.</b> Reading the foreign
-    schema asks for remote <i>data</i>; whether the <i>work</i> goes remote is the
-    planner's decision, and the badge below reports what it decided. When the two
-    disagree — you read the foreign tables and Postgres did the counting anyway —
-    that is not a bug in the page. It is the thing this workshop is about, and
-    exercise 3 causes it on purpose.</p>
+  <p class="note">Write your own SQL and read the plan. The transaction is
+    <b>read only</b>, so nothing you type here can damage the workshop.</p>
+  <p class="note"><b>There is nothing to choose.</b> Write ordinary Postgres SQL with
+    no schema prefix. The connection's <code>search_path</code> reaches the replicated
+    tables first, so <code>FROM station_status</code> is a plain query that the planner
+    routes to ClickHouse by itself — and the badge below reports where it actually
+    went. Use <code>{L}.</code> in front of a table to force the real local copy;
+    exercise 3 does exactly that, and the routing disappears with no error.</p>
   <div class="pills" id="exPills"></div>
   <div class="goal" id="exGoal"></div>
   <textarea id="labSql" spellcheck="false"></textarea>
   <div class="labbar">
-    <span class="hint">read from</span>
-    <div class="pills" id="labSides" style="margin:0"></div>
     <button class="go" id="labRun">Run</button>
+    <label class="hint" style="cursor:pointer"><input type="checkbox" id="labCompare">
+      also run it with the routing off, to compare</label>
     <span class="hint"><kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Enter</kbd></span>
     <span class="hint" id="labStatus"></span>
   </div>
@@ -198,10 +244,14 @@ a{color:var(--yellow)}
 
 </main>
 
+<!-- One tooltip for every chart, a direct child of body: inside a tab it would
+     inherit display:none the moment another tab was selected. -->
+<div id="tt"></div>
+
 <script>
 const $ = s => document.querySelector(s);
 const fmt = n => n === null || n === undefined ? '–' : Number(n).toLocaleString();
-let CATALOG = null, MAP = null, mapKey = 'stations', aggKey = 'hourly', side = 'auto';
+let CATALOG = null, MAP = null, mapKey = 'stations', aggKey = 'hourly';
 
 // ---- tabs -----------------------------------------------------------------
 // The tab lives in the URL hash so a module can link straight at it —
@@ -255,6 +305,184 @@ function verdict(el, ran, extra) {
 
 const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
+// ---- charts ---------------------------------------------------------------
+// Inline SVG, no charting library. The dashboard is still two files with no
+// build step, which is worth more here than any feature a library would add.
+//
+// Mark specs follow one rule set throughout: thin marks with 4px rounded ends
+// anchored to the baseline, 2px lines, a 2px surface gap between adjacent bars,
+// recessive grid and axes, values direct-labelled only where they fit, and a
+// legend whenever there are two series so identity is never colour alone.
+
+const TT = () => document.getElementById('tt');
+function ttShow(e, html) {
+  const t = TT(); t.innerHTML = html; t.style.opacity = 1;
+  const pad = 14, w = t.offsetWidth, h = t.offsetHeight;
+  let x = e.clientX + pad, y = e.clientY + pad;
+  if (x + w > innerWidth)  x = e.clientX - w - pad;
+  if (y + h > innerHeight) y = e.clientY - h - pad;
+  t.style.left = x + 'px'; t.style.top = y + 'px';
+}
+function ttHide() { TT().style.opacity = 0; }
+
+const SVGNS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs, parent) {
+  const n = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(n);
+  return n;
+}
+function svgRoot(host, w, h) {
+  host.innerHTML = '';
+  const s = el('svg', {class: 'chart', viewBox: `0 0 ${w} ${h}`,
+                       preserveAspectRatio: 'none', height: h}, host);
+  return s;
+}
+// Round numbers for the axis, so gridlines land on values a reader recognises.
+function niceMax(v) {
+  if (v <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  return Math.ceil(v / p * 2) / 2 * p;
+}
+const short = n => n >= 1e6 ? (n / 1e6).toFixed(n < 1e7 ? 1 : 0) + 'M'
+              : n >= 1e3 ? (n / 1e3).toFixed(n < 1e4 ? 1 : 0) + 'k' : String(n);
+
+function yAxis(s, max, x0, w, top, plotH, ticks = 3) {
+  for (let i = 0; i <= ticks; i++) {
+    const v = max * i / ticks, y = top + plotH - plotH * i / ticks;
+    el('line', {class: 'grid', x1: x0, x2: x0 + w, y1: y, y2: y,
+                opacity: i ? .5 : 1}, s);
+    const t = el('text', {class: 'glab', x: x0 - 6, y: y + 3.5,
+                          'text-anchor': 'end'}, s);
+    t.textContent = short(Math.round(v));
+  }
+}
+
+// Vertical columns, one series.
+function chartColumns(host, rows, {xi = 0, yi = 1, unit = '', every = 1}) {
+  const W = 720, H = 190, L = 38, R = 8, T = 10, B = 26;
+  const plotW = W - L - R, plotH = H - T - B;
+  const s = svgRoot(host, W, H);
+  const max = niceMax(Math.max(...rows.map(r => +r[yi]), 0));
+  yAxis(s, max, L, plotW, T, plotH);
+  const step = plotW / Math.max(rows.length, 1);
+  const bw = Math.max(2, Math.min(26, step - 2));   // 2px surface gap
+  rows.forEach((r, i) => {
+    const v = +r[yi];
+    const hgt = Math.max(v > 0 ? 1.5 : 0, plotH * (v / max));
+    const x = L + step * i + (step - bw) / 2;
+    const m = el('rect', {class: 'mark', x, y: T + plotH - hgt, width: bw,
+                          height: hgt, rx: Math.min(4, bw / 2),
+                          fill: 'var(--s1)'}, s);
+    m.addEventListener('mousemove', e =>
+      ttShow(e, `<b>${fmt(v)}</b> ${esc(unit)}<br>${esc(r[xi])}`));
+    m.addEventListener('mouseleave', ttHide);
+    if (i % every === 0) {
+      const t = el('text', {x: L + step * i + step / 2, y: H - 8,
+                            'text-anchor': 'middle'}, s);
+      t.textContent = r[xi];
+    }
+  });
+  el('line', {class: 'base', x1: L, x2: W - R, y1: T + plotH, y2: T + plotH}, s);
+}
+
+// Horizontal bars, one or two series. Long category names go on the left, which
+// is the whole reason to turn a bar chart sideways.
+function chartHBars(host, rows, {li = 0, vals = [1], names = [], unit = ''}) {
+  const rowH = vals.length > 1 ? 26 : 20, W = 720, L = 168, R = 46;
+  const H = rows.length * rowH + 12;
+  const plotW = W - L - R;
+  const s = svgRoot(host, W, H);
+  const max = niceMax(Math.max(...rows.flatMap(r => vals.map(v => +r[v])), 0));
+  const colors = ['var(--s1)', 'var(--s2)'];
+  const bh = vals.length > 1 ? 8 : 10;
+  rows.forEach((r, i) => {
+    const y0 = i * rowH + 6;
+    const lab = el('text', {x: L - 8, y: y0 + rowH / 2 - 1,
+                            'text-anchor': 'end'}, s);
+    lab.textContent = String(r[li]).length > 26
+      ? String(r[li]).slice(0, 25) + '…' : r[li];
+    vals.forEach((vk, j) => {
+      const v = +r[vk];
+      const w = Math.max(v > 0 ? 1.5 : 0, plotW * (v / max));
+      // +2 between the two bars is the surface gap, same rule as columns.
+      const y = y0 + (rowH - (bh * vals.length + 2 * (vals.length - 1))) / 2
+                + j * (bh + 2);
+      const m = el('rect', {class: 'mark', x: L, y, width: w, height: bh,
+                            rx: Math.min(4, bh / 2), fill: colors[j]}, s);
+      m.addEventListener('mousemove', e => ttShow(e,
+        `<b>${fmt(v)}</b> ${esc(unit)}<br>${esc(r[li])}`
+        + (names[j] ? `<br>${esc(names[j])}` : '')));
+      m.addEventListener('mouseleave', ttHide);
+      if (j === 0) {
+        const t = el('text', {class: 'dlab', x: L + w + 6,
+                              y: y + bh - 1}, s);
+        t.textContent = fmt(v);
+      }
+    });
+  });
+  el('line', {class: 'base', x1: L, x2: L, y1: 4, y2: H - 6}, s);
+}
+
+// Line + soft area, one or two series.
+function chartLines(host, rows, {xi = 0, vals = [1], names = [], unit = ''}) {
+  const W = 720, H = 200, L = 38, R = 10, T = 12, B = 26;
+  const plotW = W - L - R, plotH = H - T - B;
+  const s = svgRoot(host, W, H);
+  const max = niceMax(Math.max(...rows.flatMap(r => vals.map(v => +r[v])), 0));
+  yAxis(s, max, L, plotW, T, plotH);
+  const n = Math.max(rows.length - 1, 1);
+  const X = i => L + plotW * i / n;
+  const Y = v => T + plotH - plotH * (v / max);
+  const colors = ['var(--s1)', 'var(--s2)'];
+  vals.forEach((vk, j) => {
+    const pts = rows.map((r, i) => [X(i), Y(+r[vk])]);
+    el('path', {d: `M${L},${T + plotH}L` + pts.map(p => p.join(',')).join('L')
+                   + `L${X(rows.length - 1)},${T + plotH}Z`,
+                fill: colors[j], opacity: .13}, s);
+    el('path', {d: 'M' + pts.map(p => p.join(',')).join('L'), fill: 'none',
+                stroke: colors[j], 'stroke-width': 2,
+                'stroke-linejoin': 'round'}, s);
+  });
+  // One hover target per x, covering the full height — a 2px line is far too
+  // thin to aim at, so the hit area is the column, not the mark.
+  rows.forEach((r, i) => {
+    const hw = plotW / n;
+    const hit = el('rect', {x: X(i) - hw / 2, y: T, width: hw, height: plotH,
+                            fill: 'transparent', class: 'mark'}, s);
+    hit.addEventListener('mousemove', e => ttShow(e,
+      `${esc(r[xi])}<br>` + vals.map((vk, j) =>
+        `<b>${fmt(+r[vk])}</b> ${esc(names[j] || unit)}`).join('<br>')));
+    hit.addEventListener('mouseleave', ttHide);
+    if (i % Math.ceil(rows.length / 12) === 0) {
+      const t = el('text', {x: X(i), y: H - 8, 'text-anchor': 'middle'}, s);
+      t.textContent = r[xi];
+    }
+  });
+  el('line', {class: 'base', x1: L, x2: W - R, y1: T + plotH, y2: T + plotH}, s);
+}
+
+function sparkline(host, values) {
+  const W = 200, H = 30;
+  const s = svgRoot(host, W, H);
+  if (values.length < 2) return;
+  const max = Math.max(...values, 1), min = Math.min(...values, 0);
+  const n = values.length - 1;
+  const pts = values.map((v, i) =>
+    [W * i / n, H - 2 - (H - 4) * ((v - min) / (max - min || 1))]);
+  el('path', {d: `M0,${H}L` + pts.map(p => p.join(',')).join('L') + `L${W},${H}Z`,
+              fill: 'var(--s1)', opacity: .16}, s);
+  el('path', {d: 'M' + pts.map(p => p.join(',')).join('L'), fill: 'none',
+              stroke: 'var(--s1)', 'stroke-width': 2,
+              'stroke-linejoin': 'round'}, s);
+}
+
+function legend(names) {
+  const c = ['var(--s1)', 'var(--s2)'];
+  return `<div class="legend">` + names.map((n, i) =>
+    `<span><i style="background:${c[i]}"></i>${esc(n)}</span>`).join('') + `</div>`;
+}
+
 // ---- plan tree ------------------------------------------------------------
 // The verdict badge says where the work went; this says how the planner got
 // there. Foreign scans are highlighted, and so is the local work sitting above
@@ -294,10 +522,11 @@ async function loadOverview() {
       <div class="card"><h3>Stations (PostGIS)</h3>
         <div class="big">${fmt(d.postgres.stations)}</div>
         <div class="row"><span>geometry</span><span>stays in Postgres</span></div></div>
-      <div class="card"><h3>Snapshots collected</h3>
+      <div class="card kpi"><h3>Snapshots collected</h3>
         <div class="big">${fmt(d.postgres.rows_estimate)}<span class="unit">rows (est.)</span></div>
         <div class="row"><span>on disk</span><span>${d.postgres.size || '–'}</span></div>
-        <div class="row"><span>last poll</span><span>${fresh}</span></div></div>
+        <div class="row"><span>last poll</span><span>${fresh}</span></div>
+        <div class="spark viz" id="kpiSpark"></div></div>
       <div class="card"><h3>Right now</h3>
         <div class="big">${fmt(d.snapshot.bikes)}<span class="unit">bikes docked</span></div>
         <div class="row"><span>e-bikes</span><span>${fmt(d.snapshot.ebikes)}</span></div>
@@ -331,6 +560,70 @@ async function loadOverview() {
     $('#ovCards').innerHTML = `<p class="err">${e.message}</p>`;
   }
 }
+
+// ---- dashboard ------------------------------------------------------------
+// Each panel says what it cost. A chart that hides its price is how a dashboard
+// becomes the heaviest client on the database without anyone noticing.
+const PANEL_SPEC = {
+  ingest:        {w: 'w8', draw: (h, p) => chartColumns(h, p.rows,
+                    {unit: 'snapshots', every: Math.ceil(p.rows.length / 10)})},
+  system_bikes:  {w: 'w4', draw: (h, p) => chartLines(h, p.rows,
+                    {names: ['bikes docked']})},
+  fleet_hour:    {w: 'w6', draw: (h, p) => chartColumns(h, p.rows,
+                    {unit: 'bikes per dock', every: 2})},
+  dry_dist:      {w: 'w6', draw: (h, p) => chartColumns(h, p.rows,
+                    {unit: 'stations'})},
+  trip_hour:     {w: 'w8', legend: ['weekday', 'weekend'],
+                  draw: (h, p) => chartLines(h, p.rows,
+                    {vals: [1, 2], names: ['weekday trips', 'weekend trips']})},
+  trip_duration: {w: 'w4', draw: (h, p) => chartColumns(h, p.rows,
+                    {unit: 'trips'})},
+};
+
+async function loadDashboard() {
+  const btn = $('#dashRun');
+  btn.disabled = true;
+  $('#dashStatus').textContent = 'running…';
+  try {
+    const d = await (await fetch('/api/dashboard')).json();
+    if (d.error) throw new Error(d.error);
+    $('#dashGrid').innerHTML = d.panels.map(p => {
+      const spec = PANEL_SPEC[p.key] || {w: 'w6'};
+      if (p.error) return `<div class="panel ${spec.w}"><h3>${esc(p.label)}</h3>
+        <p class="err">${esc(p.error)}</p></div>`;
+      return `<div class="panel ${spec.w}">
+        <h3>${esc(p.label)}<span class="meta">${p.ms} ms · ${esc(d.schema)}</span></h3>
+        <p class="pnote">${esc(p.note)}</p>
+        ${spec.legend ? legend(spec.legend) : ''}
+        <div data-chart="${p.key}"></div>
+        <details><summary>SQL</summary><pre>${esc(p.sql)}</pre></details>
+      </div>`;
+    }).join('');
+    d.panels.filter(p => !p.error).forEach(p => {
+      const host = document.querySelector(`[data-chart="${p.key}"]`);
+      const spec = PANEL_SPEC[p.key];
+      if (host && spec) try { spec.draw(host, p); }
+        catch (e) { host.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+    });
+    // Borrow the ingest series for a sparkline in the KPI card above, so the
+    // headline number gets a trend without a seventh query.
+    const ing = d.panels.find(p => p.key === 'ingest' && !p.error);
+    const slot = $('#kpiSpark');
+    if (ing && slot) sparkline(slot, ing.rows.map(r => +r[1]));
+
+    const total = d.panels.reduce((a, p) => a + (p.ms || 0), 0);
+    $('#dashStatus').textContent =
+      `${d.panels.length} panels · ${Math.round(total)} ms total · ${esc(d.schema)}`
+      + (d.has_trips ? ` · trips windowed to ${d.window_days} days` : '');
+    btn.textContent = 'Reload charts';
+  } catch (e) {
+    $('#dashGrid').innerHTML = `<p class="err">${esc(e.message)}</p>`;
+    $('#dashStatus').textContent = '';
+  } finally {
+    btn.disabled = false;
+  }
+}
+$('#dashRun').onclick = loadDashboard;
 
 // ---- maps -----------------------------------------------------------------
 // The map is the one part of this page that can fail for reasons that have
@@ -500,13 +793,13 @@ async function loadAgg(key) {
   $('#aggVerdict').innerHTML = '<span class="spin">running…</span>';
   $('#aggTable').innerHTML = '';
   try {
-    const d = await (await fetch(`/api/agg/${key}?side=${side}`)).json();
+    const d = await (await fetch('/api/agg/' + key)).json();
     if (d.error) throw new Error(d.error);
     $('#aggNote').textContent = d.note;
     $('#aggSql').textContent = d.sql;
     $('#aggRemote').textContent = d.ran.remote_sql || '(nothing was sent remotely)';
     planTree($('#aggPlan'), d.ran.nodes, d.ran.rows_estimated);
-    verdict($('#aggVerdict'), d.ran, `${d.ms} ms · schema <code>${d.schema}</code>`);
+    verdict($('#aggVerdict'), d.ran, `${d.ms} ms · search_path <code>${esc(d.search_path)}</code>`);
     const num = i => d.rows.length && !isNaN(Number(d.rows[0][i])) && d.rows[0][i] !== '';
     $('#aggTable').innerHTML =
       '<thead><tr>' + d.columns.map((c, i) =>
@@ -520,7 +813,7 @@ async function loadAgg(key) {
 }
 
 // ---- lab ------------------------------------------------------------------
-let EX = null, exKey = 'count', labSide = 'both';
+let EX = null, exKey = 'count';
 
 function resultTable(r) {
   if (!r.columns.length) return '<p class="hint">no columns returned</p>';
@@ -542,23 +835,21 @@ async function labRun() {
   try {
     const d = await (await fetch('/api/run', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({sql, side: labSide}),
+      body: JSON.stringify({sql, compare: $('#labCompare').checked}),
     })).json();
     if (d.error) throw new Error(d.error);
     $('#labOut').className = 'sides' + (d.results.length > 1 ? ' two' : '');
     $('#labOut').innerHTML = d.results.map(r => {
-      const head = `<h4>${esc(r.schema)}
-                    <span class="hint">${r.side === 'foreign'
-                      ? 'foreign tables' : 'local tables'}</span></h4>`;
+      const head = `<h4>${esc(r.mode)}
+                    <span class="hint">search_path = ${esc(r.search_path)}</span></h4>`;
       if (r.error) return `<div class="card side">${head}
         <p class="err">${esc(r.error)}</p>
         <details><summary>SQL</summary><pre>${esc(r.sql)}</pre></details></div>`;
       // Plan above the rows, open by default. The verdict says where it ran;
       // the plan says how — and that is what the exercises are actually about.
       return `<div class="card side">${head}
-        <div class="verdict" data-v="${r.side}"></div>
-        <div class="mismatch" data-m="${r.side}"></div>
-        <details open><summary>Plan tree</summary><div class="plan" data-p="${r.side}"></div></details>
+        <div class="verdict" data-v="${esc(r.mode)}"></div>
+        <details open><summary>Plan tree</summary><div class="plan" data-p="${esc(r.mode)}"></div></details>
         <details><summary>Remote SQL</summary><pre>${
           esc(r.ran.remote_sql || '(nothing was sent remotely)')}</pre></details>
         <details><summary>SQL as sent</summary><pre>${esc(r.sql)}</pre></details>
@@ -566,26 +857,11 @@ async function labRun() {
         ${resultTable(r)}</div>`;
     }).join('');
     d.results.filter(r => !r.error).forEach(r => {
-      verdict($(`.verdict[data-v="${r.side}"]`), r.ran, `${r.ms} ms`);
-      planTree($(`.plan[data-p="${r.side}"]`), r.ran.nodes, r.ran.rows_estimated);
-      // You chose a schema; the planner chose an engine. When those disagree,
-      // that disagreement IS the lesson — so it gets said out loud instead of
-      // being left for the reader to infer from a badge they may not read.
-      const el = $(`.mismatch[data-m="${r.side}"]`);
-      if (r.side === 'foreign' && r.ran.verdict !== 'pushed') {
-        el.innerHTML = `<b>You read the foreign tables and ClickHouse did not do the work.</b>
-          Nothing errored and nothing warned. Choosing the remote schema asks for
-          remote data, not remote execution — the planner still decides, and here it
-          decided to bring the rows here. Look at the plan for the reason.`;
-      } else if (r.side === 'local' && r.ran.verdict === 'pushed') {
-        el.innerHTML = `<b>Read locally, yet the work went remote.</b> Worth a look at
-          the plan — this usually means a foreign table is reachable under the name
-          you used.`;
-      }
+      verdict($(`.verdict[data-v="${r.mode}"]`), r.ran, `${r.ms} ms`);
+      planTree($(`.plan[data-p="${r.mode}"]`), r.ran.nodes, r.ran.rows_estimated);
     });
     $('#labStatus').textContent = d.results.map(r =>
-      `${r.schema} ${r.error ? 'failed' : r.ms + ' ms'}`
-    ).join(' · ');
+      `${r.mode}: ${r.error ? 'failed' : r.ms + ' ms'}`).join('   ·   ');
   } catch (e) {
     $('#labOut').innerHTML = `<p class="err">${esc(e.message)}</p>`;
     $('#labStatus').textContent = '';
@@ -601,15 +877,8 @@ function pickExercise(key) {
     .forEach(b => b.classList.toggle('on', b.dataset.key === key));
   $('#labSql').value = x.sql;
   $('#exGoal').innerHTML = `<b>Goal.</b> ${esc(x.goal)}<br><b>Look for.</b> ${esc(x.look_for)}`;
-  // Each exercise knows which side makes its point; exercise 3 is meaningless
-  // run locally, because there is no pushdown to break.
-  setSide(CATALOG.fdw.ready ? x.side : 'local');
-}
-
-function setSide(s) {
-  labSide = s;
-  document.querySelectorAll('#labSides button')
-    .forEach(b => b.classList.toggle('on', b.dataset.s === s));
+  // Some exercises only make their point next to the un-routed run.
+  $('#labCompare').checked = !!x.compare && CATALOG.fdw.ready;
 }
 
 async function loadLab() {
@@ -620,15 +889,11 @@ async function loadLab() {
   document.querySelectorAll('#exPills button').forEach(b =>
     b.onclick = () => pickExercise(b.dataset.key));
 
-  const ready = CATALOG.fdw.ready;
-  $('#labSides').innerHTML =
-    `<button data-s="local">${esc(EX.local_schema)}</button>`
-    + (ready ? `<button data-s="foreign">${esc(EX.foreign_schema)}</button>
-                <button data-s="both">both, side by side</button>` : '');
-  document.querySelectorAll('#labSides button').forEach(b =>
-    b.onclick = () => setSide(b.dataset.s));
-  if (!ready) $('#labStatus').textContent =
-    'No foreign tables yet — finish module 06 for the ClickHouse side.';
+  if (!CATALOG.fdw.ready) {
+    $('#labCompare').disabled = true;
+    $('#labStatus').textContent =
+      'No foreign tables yet — everything resolves locally until module 06.';
+  }
 
   pickExercise('count');
 }
@@ -696,25 +961,18 @@ async function loadLog() {
   $('#aggPills').innerHTML = CATALOG.aggs.map(a =>
     `<button data-key="${a.key}">${a.label}</button>`).join('');
 
-  // The side switch only appears once there is a second side to switch to.
-  // Showing a disabled "ClickHouse" button before module 05 would imply the
-  // workshop is broken rather than unfinished.
-  if (CATALOG.fdw.ready) {
-    $('#sidePills').innerHTML =
-      `<button data-side="local">Postgres (${CATALOG.fdw.local_schema})</button>
-       <button data-side="foreign" class="on">ClickHouse (${CATALOG.fdw.foreign_schema})</button>`;
-    side = 'foreign';
-    document.querySelectorAll('#sidePills button').forEach(b => b.onclick = () => {
-      side = b.dataset.side;
-      document.querySelectorAll('#sidePills button')
-        .forEach(x => x.classList.toggle('on', x === b));
-      loadAgg(aggKey);
-    });
-  } else {
-    $('#sidePills').innerHTML =
-      `<span class="note" style="margin:0">No foreign tables yet — everything runs in
-       Postgres. Finish module 06 and a ClickHouse switch appears here.</span>`;
-  }
+  // No switch. There used to be a Postgres/ClickHouse toggle here, which made
+  // the badge a restatement of the button: pick ClickHouse, be told it ran on
+  // ClickHouse. These queries are written without a schema prefix and resolve
+  // through search_path, so the routing is the planner's and the badge is news.
+  $('#sideNote').innerHTML = CATALOG.fdw.ready
+    ? `Written without a schema prefix. <code>search_path</code> reaches
+       <code>${esc(CATALOG.fdw.foreign_schema)}</code> before
+       <code>${esc(CATALOG.fdw.local_schema)}</code>, so these are plain Postgres
+       queries and the badge reports where the planner sent each one.`
+    : `No foreign tables yet, so everything resolves against
+       <code>${esc(CATALOG.fdw.local_schema)}</code>. Finish module 06 and the same
+       queries start coming back marked ClickHouse — without changing a character.`;
 
   document.querySelectorAll('#mapPills button').forEach(b =>
     b.onclick = () => loadMap(b.dataset.key));

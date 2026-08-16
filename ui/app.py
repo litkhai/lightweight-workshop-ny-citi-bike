@@ -86,7 +86,29 @@ def dsn():
             f"options='-c statement_timeout={STATEMENT_TIMEOUT_MS}'")
 
 
-def connect(read_only=False):
+def search_path(force_local=False):
+    """What an unqualified table name resolves to.
+
+    This is the whole trick, and it is why the page no longer asks you to pick a
+    side. With the foreign schema first, `FROM station_status` is an ordinary
+    Postgres query that the planner sends to ClickHouse — no prefix, no switch,
+    nothing to choose. The pushdown is not something you select; it is what
+    happens, and the badge reports that it happened.
+
+    `force_local` is the counter-example: the same text, resolved only against the
+    real tables, so you can see what it costs when the routing does not happen.
+    """
+    if force_local or not (FOREIGN_SCHEMA and _fdw_ready_cache):
+        return LOCAL_SCHEMA
+    return f"{FOREIGN_SCHEMA}, {LOCAL_SCHEMA}"
+
+
+# Set once per request from fdw_state(); a module-level cache only so that
+# search_path() can be called without a cursor in hand.
+_fdw_ready_cache = False
+
+
+def connect(read_only=False, path=None):
     """A client-side-binding cursor, chosen deliberately.
 
     Two reasons, and the second is the one that matters here. First, the SQL
@@ -104,6 +126,9 @@ def connect(read_only=False):
     conn = psycopg.connect(dsn(), cursor_factory=ClientCursor)
     if read_only:
         conn.read_only = True
+    if path:
+        with conn.cursor() as cur:
+            cur.execute(f"SET search_path = {path}")
     return conn
 
 
@@ -217,6 +242,8 @@ def fdw_state(cur):
                (SELECT count(*) FROM information_schema.foreign_tables
                  WHERE foreign_table_schema = %s)""", (FOREIGN_SCHEMA or None,))
     ext, servers, ftables, fschemas, in_schema = cur.fetchone()
+    global _fdw_ready_cache
+    _fdw_ready_cache = bool(FOREIGN_SCHEMA and in_schema)
     return {"extension": bool(ext), "servers": servers, "foreign_tables": ftables,
             "foreign_schemas": fschemas, "in_schema": in_schema,
             "local_schema": LOCAL_SCHEMA, "foreign_schema": FOREIGN_SCHEMA,
@@ -465,6 +492,149 @@ GROUP BY 1, 2 ORDER BY trips DESC"""},
 
 
 # --------------------------------------------------------------------------- #
+# The dashboard series behind the Overview tab.
+#
+# All of these read the LOCAL schema on purpose. The Overview is an operational
+# view of the Postgres side — "is the pipeline running, and what does the data
+# look like" — and the engine comparison belongs in Statistics and the Lab, where
+# choosing a side is the point. Each panel still carries its own elapsed time,
+# because a chart that hides what it cost is the thing this dashboard is against.
+#
+# Every one is bounded. The Overview used to be a handful of index lookups and
+# safe to poll; a trip aggregate over 9.8M rows is ten seconds. Seven days is
+# enough to show a weekly shape and cheap enough to ask for on demand.
+# --------------------------------------------------------------------------- #
+
+DASH_WINDOW_DAYS = 7
+
+DASH_QUERIES = {
+    "ingest": {
+        "label": "Snapshots arriving",
+        "note": "One column per ten minutes over the last six hours. Flat is the "
+                "healthy shape — every bar should be roughly stations x polls, "
+                "because a complete feed reports every dock every time. Gaps are "
+                "where a scheduler missed.",
+        "sql": """
+SELECT to_char(bucket, 'HH24:MI') AS at,
+       rows
+FROM (
+    SELECT date_trunc('hour', polled_at)
+             + floor(extract(minute FROM polled_at) / 10) * interval '10 minutes' AS bucket,
+           count(*) AS rows
+    FROM {L}.station_status
+    WHERE polled_at > now() - interval '6 hours'
+    GROUP BY 1
+) t
+ORDER BY bucket"""},
+
+    "system_bikes": {
+        "label": "Bikes in the system",
+        "note": "Every bike sitting in a dock, summed per snapshot. This is the "
+                "city's rhythm: the trough is the fleet out on the road.",
+        "sql": """
+SELECT to_char(polled_at, 'HH24:MI') AS at,
+       sum(num_bikes_available)      AS bikes
+FROM {L}.station_status
+WHERE polled_at > now() - interval '6 hours'
+GROUP BY polled_at ORDER BY polled_at"""},
+
+    "fleet_hour": {
+        "label": "Fleet by hour of day",
+        "note": "Average bikes per dock, by hour. Columns rather than a line, and "
+                "all 24 hours whether or not you have collected them — a line "
+                "would draw a slope across the hours you have no data for.",
+        "sql": """
+WITH a AS (
+    SELECT extract(hour FROM polled_at)::int AS h,
+           avg(num_bikes_available) AS bikes
+    FROM {L}.station_status
+    GROUP BY 1
+)
+SELECT lpad(g::text, 2, '0')            AS hour,
+       coalesce(round(a.bikes, 2), 0)   AS bikes
+FROM generate_series(0, 23) g
+LEFT JOIN a ON a.h = g
+ORDER BY g"""},
+
+    "dry_dist": {
+        "label": "How often stations run dry",
+        "note": "Stations grouped by the share of observations where they had no "
+                "bike to give. Ranking the top twelve instead would just list the "
+                "ones that are always empty, all at 100% — a distribution shows "
+                "the shape, and the 'always' bar is the offline tail.",
+        "sql": """
+WITH per AS (
+    SELECT station_key,
+           100.0 * count(*) FILTER (WHERE num_bikes_available = 0)
+             / count(*) AS pct
+    FROM {L}.station_status
+    GROUP BY 1
+    HAVING count(*) >= 10
+)
+SELECT bucket, count(*) AS stations
+FROM (
+    SELECT CASE WHEN pct = 0    THEN 'never'
+                WHEN pct < 5    THEN 'under 5%'
+                WHEN pct < 20   THEN '5–20%'
+                WHEN pct < 50   THEN '20–50%'
+                WHEN pct < 100  THEN '50–99%'
+                ELSE 'always'  END AS bucket,
+           CASE WHEN pct = 0 THEN 1 WHEN pct < 5 THEN 2 WHEN pct < 20 THEN 3
+                WHEN pct < 50 THEN 4 WHEN pct < 100 THEN 5 ELSE 6 END AS ord
+    FROM per
+) t
+GROUP BY bucket, ord ORDER BY ord"""},
+}
+
+# Shown only when module 09 has been run. Both are windowed hard.
+DASH_TRIP_QUERIES = {
+    "trip_hour": {
+        "label": "Trips by hour — weekday vs weekend",
+        "note": f"Generated trips over the last {DASH_WINDOW_DAYS} days, in New York "
+                "local time. Two commuter peaks on weekdays, one broad afternoon "
+                "hump at the weekend.",
+        "sql": """
+SELECT lpad(h::text, 2, '0') AS hour,
+       sum(CASE WHEN wk THEN n ELSE 0 END) AS weekday,
+       sum(CASE WHEN wk THEN 0 ELSE n END) AS weekend
+FROM (
+    SELECT extract(hour FROM started_at AT TIME ZONE 'America/New_York')::int AS h,
+           extract(isodow FROM started_at AT TIME ZONE 'America/New_York') < 6 AS wk,
+           count(*) AS n
+    FROM {L}.sim_trips
+    WHERE started_at > now() - interval '{days} days'
+    GROUP BY 1, 2
+) t
+GROUP BY h ORDER BY h"""},
+
+    "trip_duration": {
+        "label": "Trip length",
+        "note": "Minutes, bucketed. Short and right-skewed is what a docked system "
+                "looks like — and here it is also what the generator was told to do.",
+        "sql": """
+SELECT bucket, count(*) AS trips
+FROM (
+    SELECT CASE
+             WHEN duration_s <  300 THEN '0–5'
+             WHEN duration_s <  600 THEN '5–10'
+             WHEN duration_s <  900 THEN '10–15'
+             WHEN duration_s < 1800 THEN '15–30'
+             WHEN duration_s < 3600 THEN '30–60'
+             ELSE '60+'
+           END AS bucket,
+           CASE
+             WHEN duration_s <  300 THEN 1 WHEN duration_s <  600 THEN 2
+             WHEN duration_s <  900 THEN 3 WHEN duration_s < 1800 THEN 4
+             WHEN duration_s < 3600 THEN 5 ELSE 6
+           END AS ord
+    FROM {L}.sim_trips
+    WHERE started_at > now() - interval '{days} days'
+) t
+GROUP BY bucket, ord ORDER BY ord"""},
+}
+
+
+# --------------------------------------------------------------------------- #
 # The lab. Everything above answers a question the page chose; everything below
 # lets the reader ask their own, which is the difference between a demo and an
 # exercise.
@@ -476,36 +646,39 @@ GROUP BY 1, 2 ORDER BY trips DESC"""},
 
 EXERCISES = {
     "count": {
-        "label": "1 · The simplest pushdown",
-        "goal": "Get a verdict of ClickHouse, and understand why this shape is the easy case.",
-        "look_for": "Remote SQL should contain count(). One row comes back; nothing else crosses.",
-        "side": "both",
-        "sql": "SELECT count(*) AS snapshots FROM {S}.station_status",
+        "label": "1 · Plain SQL, and it goes remote",
+        "goal": "Write an ordinary Postgres query with no schema prefix and watch "
+                "where it runs.",
+        "look_for": "Verdict: ClickHouse. Remote SQL contains count(). You did not "
+                    "choose that — the planner did.",
+        "compare": False,
+        "sql": "SELECT count(*) AS snapshots FROM station_status",
     },
     "working_join": {
-        "label": "2 · A join that stays remote",
-        "goal": "Both tables are replicated, so the join is remote work too.",
-        "look_for": "Remote SQL carries the JOIN and the GROUP BY. Rows crossed should be tiny.",
-        "side": "both",
+        "label": "2 · A join goes too",
+        "goal": "Two tables, still no prefix, still nothing to select.",
+        "look_for": "Remote SQL carries the JOIN and the GROUP BY. One Foreign Scan "
+                    "node in the plan and nothing above it.",
+        "compare": True,
         "sql": """SELECT st.name, count(*) AS observations,
        round(avg(ss.num_bikes_available), 1) AS avg_bikes
-FROM {S}.station_status ss
-JOIN {S}.stations st ON st.station_key = ss.station_key
+FROM station_status ss
+JOIN stations st ON st.station_key = ss.station_key
 GROUP BY st.name
 ORDER BY observations DESC
 LIMIT 10""",
     },
     "broken_join": {
         "label": "3 · Break it on purpose",
-        "goal": "One local table in the join collapses the pushdown — silently, with no error.",
-        "look_for": "Verdict flips to Postgres. Compare 'rows crossed' with exercise 2: every "
-                    "status row now comes back to be joined here.",
-        "side": "foreign",
-        "sql": """-- station_status is remote, stations is forced local with {L}.
--- This is the single most common way a working pushdown stops working.
+        "goal": "Name one table explicitly so it can only be the local copy.",
+        "look_for": "Verdict flips to Postgres. Remote SQL selects columns only — "
+                    "every row came back to be joined here. No error, no warning.",
+        "compare": False,
+        "sql": """-- {L} forces the real Postgres table instead of letting
+-- search_path reach the replicated one. One prefix, and the routing is gone.
 SELECT st.name, count(*) AS observations,
        round(avg(ss.num_bikes_available), 1) AS avg_bikes
-FROM {S}.station_status ss
+FROM station_status ss
 JOIN {L}.stations st ON st.station_key = ss.station_key
 GROUP BY st.name
 ORDER BY observations DESC
@@ -513,14 +686,15 @@ LIMIT 10""",
     },
     "geometry": {
         "label": "4 · Geometry cannot cross",
-        "goal": "Ask for a spatial predicate over the remote table and watch what has to happen.",
-        "look_for": "ST_DWithin needs geom, which only exists locally — so the aggregate cannot "
-                    "go remote no matter how simple it looks.",
-        "side": "foreign",
+        "goal": "Ask for a spatial predicate and see which side has to answer.",
+        "look_for": "ST_DWithin needs geom, and the replicated copy has no such "
+                    "column — so the stations table here must be the local one, "
+                    "and the aggregate cannot leave with it.",
+        "compare": False,
         "sql": """-- Everything within 500 m of Grand Army Plaza.
 SELECT count(*) AS observations,
        round(avg(ss.num_bikes_available), 1) AS avg_bikes
-FROM {S}.station_status ss
+FROM station_status ss
 JOIN {L}.stations st ON st.station_key = ss.station_key
 WHERE ST_DWithin(st.geom::geography,
                  ST_SetSRID(ST_MakePoint(-73.9699, 40.6743), 4326)::geography,
@@ -528,40 +702,45 @@ WHERE ST_DWithin(st.geom::geography,
     },
     "window_covered": {
         "label": "5 · The window function that does not sort",
-        "goal": "The surprise: with the module-02 index, Postgres reads straight down it.",
-        "look_for": "In the plan tree, an Index Scan on status_station_time_ix and NO Sort node. "
-                    "This is Postgres doing well.",
-        "side": "local",
+        "goal": "The surprise: with the module-02 index, Postgres reads straight "
+                "down it. Compare, and watch which side wins.",
+        "look_for": "On the Postgres-only run: an Index Scan and NO Sort node. This "
+                    "is Postgres doing well.",
+        "compare": True,
         "sql": """SELECT station_key, polled_at, num_bikes_available,
        num_bikes_available - lag(num_bikes_available)
            OVER (PARTITION BY station_key ORDER BY polled_at) AS delta
-FROM {S}.station_status
+FROM station_status
 ORDER BY station_key, polled_at
 LIMIT 200""",
     },
     "window_uncovered": {
         "label": "6 · Now uncover the index",
-        "goal": "Change the ordering and the same query has to sort. This is the honest argument.",
-        "look_for": "A Sort node appears. You can index for one access path, not for all of them "
-                    "— and the second question you ask is never the one you indexed for.",
-        "side": "local",
+        "goal": "Change the ordering and the same query has to sort. This is the "
+                "honest argument.",
+        "look_for": "A Sort node appears. You can index for one access path, not "
+                    "for all of them — and the second question you ask is never "
+                    "the one you indexed for.",
+        "compare": True,
         "sql": """-- Identical shape to exercise 5, ordered by a column the index does not carry.
 SELECT station_key, num_bikes_available,
        num_bikes_available - lag(num_bikes_available)
            OVER (PARTITION BY station_key ORDER BY num_bikes_available) AS delta
-FROM {S}.station_status
+FROM station_status
 LIMIT 200""",
     },
     "your_own": {
         "label": "7 · Your own query",
-        "goal": "Write anything. The transaction is read only, so you cannot break the workshop.",
-        "look_for": "Whatever you were curious about. Run it on both sides and compare the plans.",
-        "side": "both",
+        "goal": "Write anything. The transaction is read only, so you cannot break "
+                "the workshop.",
+        "look_for": "Whatever you were curious about. Tick compare to see what the "
+                    "same text costs without the routing.",
+        "compare": True,
         "sql": """SELECT date_trunc('hour', polled_at) AS hour,
        count(*)                        AS observations,
        sum(num_bikes_available)        AS bikes,
        sum(num_ebikes_available)       AS ebikes
-FROM {S}.station_status
+FROM station_status
 GROUP BY 1
 ORDER BY 1 DESC
 LIMIT 24""",
@@ -755,6 +934,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(raw)))
+        # Never cache. index.html carries all the JS, so a cached copy survives
+        # `docker compose up --build` and silently runs the old dashboard against
+        # the new API — which looks like the new code is broken. Cost is one small
+        # file per load; the confusion it prevents is worth far more than that.
+        self.send_header("Cache-Control", "no-store, must-revalidate")
         self.end_headers()
         self.wfile.write(raw)
 
@@ -776,6 +960,8 @@ class Handler(BaseHTTPRequestHandler):
                     "fdw": state}))
             if path == "/api/overview":
                 return self._overview()
+            if path == "/api/dashboard":
+                return self._dashboard()
             if path == "/api/checks":
                 with connect() as conn, conn.cursor() as cur:
                     state = fdw_state(cur)
@@ -791,8 +977,7 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/map/"):
                 return self._map(path.rsplit("/", 1)[1])
             if path.startswith("/api/agg/"):
-                return self._agg(path.rsplit("/", 1)[1],
-                                 (q.get("side", ["auto"])[0] or "auto"))
+                return self._agg(path.rsplit("/", 1)[1])
             self._send(404, json.dumps({"error": "not found"}))
         except Exception as exc:                                  # noqa: BLE001
             self._send(500, json.dumps({"error": f"{type(exc).__name__}: {exc}"}))
@@ -803,49 +988,54 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             body = json.loads(self.rfile.read(length) or b"{}")
             if parsed.path == "/api/run":
-                return self._run(body.get("sql", ""), body.get("side", "both"))
+                return self._run(body.get("sql", ""),
+                                 bool(body.get("compare")))
             self._send(404, json.dumps({"error": "not found"}))
         except Exception as exc:                                  # noqa: BLE001
             self._send(500, json.dumps({"error": f"{type(exc).__name__}: {exc}"}))
 
-    def _run(self, sql, side):
-        """The lab. Arbitrary SQL, read only, on either side or on both.
+    def _run(self, sql, compare=False):
+        """The lab. Arbitrary SQL, read only, no side to pick.
 
-        Running the same text against both schemas in one request is the point:
-        two verdicts and two timings from one query is an argument, where either
-        one on its own is just a number.
+        The query runs exactly as written, against a search_path that reaches the
+        foreign tables first. Whether the work goes to ClickHouse is the planner's
+        decision and the verdict reports it — which is the demonstration. Asking
+        the reader to choose an engine first made the badge tautological.
+
+        `compare` re-runs the same text with the foreign schema out of the path, so
+        the counter-example is an extra step rather than a precondition.
         """
         sql = (sql or "").strip().rstrip(";").strip()
         if not sql:
             return self._send(400, json.dumps({"error": "nothing to run"}))
 
         results = []
-        with QUERY_SLOT, connect(read_only=True) as conn, conn.cursor() as cur:
-            state = fdw_state(cur)
-            wanted = (["local", "foreign"] if side == "both" else [side])
-            for which in wanted:
-                if which == "foreign" and not state["ready"]:
-                    continue
-                schema = FOREIGN_SCHEMA if which == "foreign" else LOCAL_SCHEMA
-                text = sql.replace("{S}", schema).replace("{L}", LOCAL_SCHEMA)
+        with QUERY_SLOT, connect(read_only=True) as probe, probe.cursor() as pc:
+            state = fdw_state(pc)
+
+        modes = [("as written", False)]
+        if compare and state["ready"]:
+            modes.append(("Postgres only", True))
+
+        for label, force_local in modes:
+            path = search_path(force_local=force_local)
+            with QUERY_SLOT, connect(read_only=True, path=path) as conn, \
+                 conn.cursor() as cur:
+                # `{S}.` drops out entirely — an unqualified name is the point now.
+                # Replacing `{S}` alone would leave a leading dot and a syntax
+                # error. `{L}.` still resolves, because forcing one side by name
+                # is exactly what the counter-example needs.
+                text = sql.replace("{S}.", "").replace("{L}", LOCAL_SCHEMA)
                 try:
                     r = run_one(cur, text, state["ready"])
                 except Exception as exc:                           # noqa: BLE001
-                    # One side failing is itself a result — exercise 4 is
-                    # supposed to be refused by ClickHouse, and seeing the error
-                    # next to the working side is the lesson.
                     conn.rollback()
-                    results.append({"side": which, "schema": schema, "sql": text,
+                    results.append({"mode": label, "search_path": path, "sql": text,
                                     "error": f"{type(exc).__name__}: {exc}"})
                     continue
-                record("lab", side if side != "both" else which,
-                       r["ran"], r["ms"], len(r["rows"]), text, schema)
-                results.append(dict(r, side=which, schema=schema, sql=text))
+                record("lab", label, r["ran"], r["ms"], len(r["rows"]), text, path)
+                results.append(dict(r, mode=label, search_path=path, sql=text))
 
-        if not results:
-            return self._send(400, json.dumps({
-                "error": "no foreign tables are configured, so there is no "
-                         "ClickHouse side to run against yet"}))
         self._send(200, json.dumps({"results": results, "fdw": state}))
 
     def _overview(self):
@@ -966,26 +1156,89 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, json.dumps({"geojson": geojson, "ms": ms, "sql": sql,
                                     "note": q["note"], "ran": ran}))
 
-    def _agg(self, name, side):
+    def _dashboard(self):
+        """Every Overview chart in one round trip, each timed on its own.
+
+        Deliberately not polled. The cheap cards above it refresh themselves; a
+        trip aggregate does not belong on a 30-second timer, and pretending
+        otherwise is how a dashboard quietly becomes the heaviest client on the
+        database.
+        """
+        panels = []
+        with QUERY_SLOT, connect(read_only=True, path=LOCAL_SCHEMA) as conn, \
+             conn.cursor() as cur:
+            has_trips = False
+            try:
+                cur.execute(f"SELECT count(*) FROM {LOCAL_SCHEMA}.sim_trips")
+                has_trips = cur.fetchone()[0] > 0
+            except Exception:                                      # noqa: BLE001
+                conn.rollback()          # module 09 not run; the table is absent
+
+            wanted = list(DASH_QUERIES.items())
+            if has_trips:
+                wanted += list(DASH_TRIP_QUERIES.items())
+
+            for key, q in wanted:
+                # str.replace, not %-formatting: these queries contain literal
+                # per-cent signs in their bucket labels.
+                sql = (q["sql"].replace("{L}", LOCAL_SCHEMA)
+                               .replace("{days}", str(DASH_WINDOW_DAYS))).strip()
+                try:
+                    t0 = time.perf_counter()
+                    cur.execute(sql)
+                    cols = [c.name for c in cur.description]
+                    rows = [list(r) for r in cur.fetchall()]
+                    ms = round((time.perf_counter() - t0) * 1000, 1)
+                except Exception as exc:                           # noqa: BLE001
+                    conn.rollback()
+                    panels.append({"key": key, "label": q["label"], "note": q["note"],
+                                   "error": f"{type(exc).__name__}: "
+                                            f"{str(exc).splitlines()[0]}"})
+                    continue
+                # Decimal from round() is not JSON-serialisable.
+                rows = [[float(v) if hasattr(v, "quantize") else v for v in r]
+                        for r in rows]
+                panels.append({"key": key, "label": q["label"], "note": q["note"],
+                               "columns": cols, "rows": rows, "ms": ms, "sql": sql})
+                record("dash", key, {"where": "postgres", "verdict": "local",
+                                     "detail": "Overview panel, local schema",
+                                     "rows_widest": len(rows)},
+                       ms, len(rows), sql, LOCAL_SCHEMA)
+
+        self._send(200, json.dumps({"panels": panels, "schema": LOCAL_SCHEMA,
+                                    "window_days": DASH_WINDOW_DAYS,
+                                    "has_trips": has_trips}))
+
+    def _agg(self, name):
+        """One aggregate, written without a schema prefix.
+
+        There is no side to choose. The connection's search_path puts the foreign
+        schema first when it exists, so `FROM station_status` is a plain Postgres
+        query that the planner routes to ClickHouse on its own — and the verdict
+        below reports where it actually went. Offering a Postgres/ClickHouse
+        switch here made the answer a restatement of the question.
+        """
         q = AGG_QUERIES.get(name)
         if not q:
             return self._send(404, json.dumps({"error": f"no aggregate {name!r}"}))
-        with QUERY_SLOT, connect() as conn, conn.cursor() as cur:
-            state = fdw_state(cur)
-            schema, resolved = pick_schema(side, state)
-            sql = q["sql"].replace("{S}", schema).strip()
+        with connect() as probe, probe.cursor() as pc:
+            state = fdw_state(pc)
+        path = search_path()
+        with QUERY_SLOT, connect(path=path) as conn, conn.cursor() as cur:
+            sql = (q["sql"].replace("{S}.", "")
+                           .replace("{L}.", LOCAL_SCHEMA + ".")).strip()
             cur.execute("EXPLAIN (VERBOSE, COSTS ON, FORMAT JSON) " + sql)
-            plan = cur.fetchone()[0]
-            ran = analyse(plan, state["ready"])
+            ran = analyse(cur.fetchone()[0], state["ready"])
             t0 = time.perf_counter()
             cur.execute(sql)
             cols = [c.name for c in cur.description]
-            rows = [[str(v) if v is not None else "" for v in r] for r in cur.fetchall()]
+            rows = [[str(v) if v is not None else "" for v in r]
+                    for r in cur.fetchall()]
             ms = round((time.perf_counter() - t0) * 1000, 1)
-        record("agg", name, ran, ms, len(rows), sql, schema)
+        record("agg", name, ran, ms, len(rows), sql, path)
         self._send(200, json.dumps({
             "columns": cols, "rows": rows, "ms": ms, "sql": sql, "note": q["note"],
-            "schema": schema, "side": resolved, "ran": ran, "fdw": state}))
+            "search_path": path, "ran": ran, "fdw": state}))
 
     def _log(self):
         with LOG_LOCK:

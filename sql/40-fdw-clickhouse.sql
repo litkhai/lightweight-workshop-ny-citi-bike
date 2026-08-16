@@ -96,6 +96,28 @@ IMPORT FOREIGN SCHEMA :"ch_db"
     INTO ny_citibike_ch;
 
 -- --------------------------------------------------------------------------
+-- Take the geometry back off the remote table
+-- --------------------------------------------------------------------------
+--
+-- ClickPipes replicates every column, so `geom` came across — as `text`, since
+-- ClickHouse has no geometry type. IMPORT FOREIGN SCHEMA then faithfully gave
+-- the foreign table a text column called `geom`, which is a trap rather than a
+-- feature:
+--
+--   ny_citibike.stations.geom      geometry   — GiST indexed, what ST_* wants
+--   ny_citibike_ch.stations.geom   text       — a string that looks like it
+--
+-- A spatial query that reaches the remote table by search_path would then cast
+-- text to geography for every row, silently, with no index — slower than the
+-- local answer and indistinguishable from it in the output. Dropping the column
+-- from the foreign table turns that into "column geom does not exist", which is
+-- the truth and is also the lesson: geometry does not cross.
+--
+-- This does not touch ClickHouse. It only stops Postgres pretending the column
+-- is usable from here.
+ALTER FOREIGN TABLE ny_citibike_ch.stations DROP COLUMN IF EXISTS geom;
+
+-- --------------------------------------------------------------------------
 -- Did it work?
 -- --------------------------------------------------------------------------
 
