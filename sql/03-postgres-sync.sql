@@ -102,7 +102,23 @@ BEGIN
         name      = EXCLUDED.name,
         capacity  = EXCLUDED.capacity,
         geom      = EXCLUDED.geom,
-        last_seen = now();
+        last_seen = now()
+    -- Only write the row if something in it actually changed.
+    --
+    -- Without this WHERE the upsert rewrote all 2,509 stations every minute
+    -- whether they had changed or not. Measured after 514 sync runs:
+    -- 1,289,626 updates on a 2,509-row table, which is 2509 x 514 exactly —
+    -- 3.6M no-op writes a day, every one of them WAL, replicated through
+    -- ClickPipes, and left for autovacuum. On the table this workshop describes
+    -- as the half that "barely changes".
+    --
+    -- The cost was a `last_seen` that ticked forward for untouched rows. It now
+    -- means "when this row's content last changed" rather than "when we last saw
+    -- the station" — and feed freshness was never this column's job anyway:
+    -- station_status.polled_at answers that, once, for the whole feed.
+    WHERE ny_citibike.stations.name     IS DISTINCT FROM EXCLUDED.name
+       OR ny_citibike.stations.capacity IS DISTINCT FROM EXCLUDED.capacity
+       OR ny_citibike.stations.geom     IS DISTINCT FROM EXCLUDED.geom;
     GET DIAGNOSTICS s = ROW_COUNT;
 
     -- A high-water mark rather than a "since last run" timestamp. If a run is

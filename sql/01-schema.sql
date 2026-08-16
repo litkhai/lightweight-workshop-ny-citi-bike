@@ -37,6 +37,12 @@ CREATE TABLE IF NOT EXISTS ny_citibike.stations (
     geom          geometry(Point, 4326),
 
     first_seen    timestamptz NOT NULL DEFAULT now(),
+
+    -- When this row's *content* last changed, not when the station was last in
+    -- the feed. The sync in sql/03-postgres-sync.sql skips rows whose values are
+    -- unchanged, because touching all 2,509 every minute cost 3.6M no-op writes
+    -- a day for a timestamp nobody reads. Feed freshness is
+    -- station_status.polled_at.
     last_seen     timestamptz NOT NULL DEFAULT now()
 );
 
