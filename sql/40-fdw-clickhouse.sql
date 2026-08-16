@@ -35,12 +35,28 @@ CREATE EXTENSION IF NOT EXISTS pg_clickhouse;
 -- Server and credentials
 -- --------------------------------------------------------------------------
 
-DROP SERVER IF EXISTS ny_citibike_ch_svr CASCADE;
+-- The same server module 03 created, if you have run it. There is one server for
+-- this workshop, not one per purpose — see sql/03-postgres-sync.sql for why the
+-- second one was removed.
+--
+-- Created here too, so this file stands alone if you skipped ingestion. Not
+-- dropped and recreated: that would take module 03's landing-table imports with
+-- it, and this script has no way to put them back.
+SELECT set_config('citibike.ch_host', :'ch_host', false);
+SELECT set_config('citibike.ch_db',   :'ch_db',   false);
 
-CREATE SERVER ny_citibike_ch_svr
-    FOREIGN DATA WRAPPER clickhouse_fdw
-    OPTIONS (host :'ch_host', port '8443', dbname :'ch_db', secure 'true');
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_foreign_server WHERE srvname = 'ny_citibike_ch_svr') THEN
+        EXECUTE format(
+            'CREATE SERVER ny_citibike_ch_svr FOREIGN DATA WRAPPER clickhouse_fdw '
+            'OPTIONS (host %L, port ''8443'', dbname %L, secure ''true'')',
+            current_setting('citibike.ch_host'), current_setting('citibike.ch_db'));
+    END IF;
+END
+$$;
 
+DROP USER MAPPING IF EXISTS FOR CURRENT_USER SERVER ny_citibike_ch_svr;
 CREATE USER MAPPING FOR CURRENT_USER
     SERVER ny_citibike_ch_svr
     OPTIONS (user :'ch_user', password :'ch_pass');
@@ -60,12 +76,22 @@ CREATE USER MAPPING FOR CURRENT_USER
 -- Identical table name, identical column list, one prefix apart. That is what
 -- makes the comparison in module 06 mean something: when the verdict changes,
 -- the only thing that changed was where the work went.
+--
+-- If you ran module 03 this schema already exists and holds the two landing
+-- tables. Only the two imported here are replaced, so re-running either script
+-- leaves the other's alone.
 
-DROP SCHEMA IF EXISTS ny_citibike_ch CASCADE;
-CREATE SCHEMA ny_citibike_ch;
+CREATE SCHEMA IF NOT EXISTS ny_citibike_ch;
 
+DROP FOREIGN TABLE IF EXISTS ny_citibike_ch.stations, ny_citibike_ch.station_status,
+                             ny_citibike_ch.sim_trips;
+
+-- sim_trips is listed but optional: it exists only if you ran module 09 and added
+-- it to the ClickPipe. LIMIT TO quietly skips a table the remote does not have,
+-- so this is safe on the core path — and re-running this file after module 09 is
+-- what picks the trip table up.
 IMPORT FOREIGN SCHEMA :"ch_db"
-    LIMIT TO (stations, station_status)
+    LIMIT TO (stations, station_status, sim_trips)
     FROM SERVER ny_citibike_ch_svr
     INTO ny_citibike_ch;
 

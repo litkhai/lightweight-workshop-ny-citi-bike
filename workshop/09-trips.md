@@ -174,6 +174,34 @@ Measured: 312,041 rows in 32 seconds, so roughly 11,000 rows/second.
     The procedure commits once per day rather than once overall, so replication
     drains while it runs and a cancelled backfill keeps what it already wrote.
 
+!!! note "Optional: cap it with a TTL on the ClickHouse side"
+    Nothing here sets one, because for a workshop you tear down in an afternoon a
+    retention policy is a step that earns nothing. If you leave it running, the
+    trip table has no natural bound and the landing table grows at the same
+    3.6M/day as the fact table it feeds, forever, for nothing.
+
+    Two statements, whenever you want them — both tables already exist by this
+    point, so this is an `ALTER` rather than something the schema can declare:
+
+    ```sql
+    ALTER TABLE ny_citibike.sim_trips
+        MODIFY TTL toDate(started_at) + INTERVAL 180 DAY;
+
+    ALTER TABLE ny_citibike.gbfs_status
+        MODIFY TTL toDate(polled_at) + INTERVAL 30 DAY;
+    ```
+
+    Leave `station_status` alone. It is the table module 06 measures, and its
+    contents are meant to be whatever Postgres holds — a TTL only on this side
+    would make the two disagree by design, which is exactly the confusion module
+    05 spends a paragraph heading off. Bound the fact table in Postgres instead
+    and let replication carry the deletes across.
+
+    TTL deletes during merges, not on a schedule, so expired rows survive until
+    their part is merged. And because these tables are ordered by primary key
+    rather than partitioned by time, it is row-level rather than whole-part
+    deletion — cheaper if you partition by month first, on a table you own.
+
 !!! danger "Cancelling psql does not cancel the backfill"
     A killed client leaves the backend running, holding locks the per-minute tick
     then queues behind. This happened while building the module. Find it:
@@ -198,12 +226,12 @@ convincing one than a Voronoi diagram.
 is evidence rather than decoration. Measured on Managed Postgres with 9.8M trips
 in, all three running locally:
 
-| Aggregate | Rows at the widest node | Local |
-|---|---|---|
-| Trips by hour | 9.8M | **12.2 s** |
-| Busiest routes — 4 relations | 9.8M | **9.8 s** |
-| Member vs casual | 4.1M | 1.6 s |
-| *Fleet by hour, over `station_status`* | *650k* | *0.17 s* |
+| Aggregate | `ny_citibike` | `ny_citibike_ch` | |
+|---|---|---|---|
+| Trips by hour | 10,404 ms | **465 ms** | 22x |
+| Busiest routes — 4 relations | 8,234 ms | **1,606 ms** | 5.1x |
+| Member vs casual | 1,691 ms | **527 ms** | 3.2x |
+| *Fleet by hour, over `station_status` (650k rows)* | *175 ms* | — | |
 
 That last row is the point of the table. Everything in modules 00–08 answers in
 milliseconds because the fact table is small; the workshop had to argue from the

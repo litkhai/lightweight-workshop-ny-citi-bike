@@ -27,8 +27,8 @@ thing this page could do.
 |---|---|
 | `GET /api/catalog` | Query list and current FDW state |
 | `GET /api/overview` | Both halves: counts, size, lag, both schedulers, replication slot, FDW. Index work, safe to poll |
-| `GET /api/map/<name>` | GeoJSON from PostGIS: `stations`, `voronoi`, `pressure` |
-| `GET /api/agg/<name>` | One aggregate: `hourly`, `busiest`, `stranded`, `electric`. `?side=auto\|local\|foreign` |
+| `GET /api/map/<name>` | GeoJSON from PostGIS: `stations`, `voronoi`, `pressure`, `flows` |
+| `GET /api/agg/<name>` | One aggregate: `hourly`, `busiest`, `stranded`, `electric`, plus `trip_*` from module 09. `?side=auto\|local\|foreign` |
 | `GET /api/exercises` | The lab's preset exercises |
 | `GET /api/checks` | One pass/fail checkpoint per thing a module should have left behind |
 | `POST /api/run` | `{sql, side}` — arbitrary SQL, read only. `side` is `local`, `foreign` or `both` |
@@ -56,6 +56,12 @@ under test and `{L}` is always local, so one query text can be sent to both
 sides in a single request and come back with two plans and two timings. That
 comparison is the whole lesson; either side alone is just a number.
 
+The selector therefore picks a **schema**, not an engine, and the UI says so: it
+is labelled "read from" and the buttons carry schema names. Reading the foreign
+schema asks for remote data; whether the work goes remote stays the planner's
+call. When the two diverge the result card says so in red — that divergence is
+the subject, and exercise 3 provokes it deliberately.
+
 Results are capped at 500 rows on the way to the browser. The plan is the point.
 
 ## Checks
@@ -65,7 +71,7 @@ that, the first failure aborts the transaction and every later check reports
 "current transaction is aborted" instead of its own result — exactly backwards,
 since the failing checks are the ones a reader opened the tab to see. Half of
 them touch objects that legitimately do not exist yet (`cron.job` before module
-03, `ny_citibike_ingest` before the FDW), so failure is the normal case here.
+03, `ny_citibike_ch` before the FDW), so failure is the normal case here.
 
 ## The verdict
 

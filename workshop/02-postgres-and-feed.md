@@ -31,15 +31,13 @@ engines, and the *only* thing that differs will be a schema prefix. If the names
 drifted — `citibike` here, `default` there — you could never be sure whether a
 changed result came from changed routing or from having typed a different table.
 
-Two derived names appear later. Both are **local** Postgres schemas holding
-foreign tables, and both take a suffix because the real schema already owns the
-bare name:
+One derived name appears later. It is a **local** Postgres schema holding foreign
+tables, and it takes a suffix because the real schema already owns the bare name:
 
 | Name | Created in | What it is |
 |---|---|---|
 | `ny_citibike` | module 02 | the real Postgres schema. Geometry lives here |
-| `ny_citibike_ingest` | module 03 | foreign tables over ClickHouse's landing tables |
-| `ny_citibike_ch` | module 06 | foreign tables over ClickHouse's CDC mirror |
+| `ny_citibike_ch` | modules 03 and 06 | foreign tables — ClickHouse, seen from inside Postgres |
 
 ## Create the schema
 

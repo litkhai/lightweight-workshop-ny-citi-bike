@@ -30,7 +30,7 @@ Citi Bike GBFS            public JSON · no API key · ~2,500 stations · refres
       ▼
 ClickHouse Cloud          database ny_citibike
       gbfs_status                                  ← landing
-      │  ny_citibike_ingest.gbfs_status  +  pg_cron, every minute
+      │  ny_citibike_ch.gbfs_status  +  pg_cron, every minute
       ▼
 ClickHouse Managed Postgres   schema ny_citibike
       stations              PostGIS points  · 2,500 rows      · barely changes
@@ -127,6 +127,7 @@ statements, via `scripts/clickhouse.sh` — runs from this repository.
 
 ```text
 workshop/       the guide — also published as the documentation site
+                data-model.md  every table on both engines, and the five routes
 clickhouse/     01 the refreshable MV that pulls the feed (runs on ClickHouse)
 sql/            01 schema · 02 verify · 03 the Postgres side of ingestion
                 03-check  can Postgres fetch https itself? (no, and why)

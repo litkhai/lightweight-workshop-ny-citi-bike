@@ -15,7 +15,7 @@
 --   GBFS ──https──► ClickHouse  refreshable MV, every minute
 --                   ny_citibike.gbfs_status          (landing)
 --                        │
---                   pg_clickhouse foreign table
+--                   ny_citibike_ch.gbfs_status  (foreign table)
 --                        │
 --                   pg_cron, every minute
 --                        ▼
@@ -41,41 +41,57 @@ CREATE EXTENSION IF NOT EXISTS pg_clickhouse;
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
 -- --------------------------------------------------------------------------
--- Reach the landing tables
+-- Reach ClickHouse
 -- --------------------------------------------------------------------------
 --
--- A server of its own, pointed at the `ny_citibike` database on ClickHouse —
--- the same database module 06's server will point at, and the same name as the
--- Postgres schema. Everything in this workshop is called `ny_citibike` on both
--- engines; only the local foreign-table schemas take a suffix.
+-- One foreign server, and module 06 uses the same one.
 --
--- Two servers to one database is deliberate, and they differ in two ways that
--- matter:
+-- There were two for a while — a separate `ny_citibike_ingest_svr` on the native
+-- port for ingestion and `ny_citibike_ch_svr` on HTTPS for the pushdown — on the
+-- theory that "how data arrives" and "what the workshop measures" deserved
+-- separate plumbing. Once both sides were named ny_citibike they were pointing at
+-- the same database over two protocols, and the one server reads the landing
+-- tables perfectly well. Two servers meant two user mappings, so the ClickHouse
+-- password was stored twice, and a third schema name to explain.
 --
---   ny_citibike_ingest_svr   port 9440, native binary   → how data arrives
---   ny_citibike_ch_svr       port 8443, HTTPS           → what the workshop measures
+-- So the whole vocabulary is two names:
 --
--- Keeping them apart means module 08 can tear down ingestion without touching
--- the thing the pushdown lesson depends on.
+--   ny_citibike       the real Postgres schema, and the ClickHouse database
+--   ny_citibike_ch    foreign tables — ClickHouse, seen from inside Postgres
+--
+-- Idempotent by hand rather than by DROP: there is no CREATE SERVER IF NOT
+-- EXISTS, and dropping the server here would take module 06's foreign tables
+-- with it. Each script drops and re-imports only the tables it owns.
 
-DROP SERVER IF EXISTS ny_citibike_ingest_svr CASCADE;
+-- psql does not interpolate :variables inside a $$-quoted body, so the host is
+-- handed to the DO block as a session setting instead of pasted into it.
+SELECT set_config('citibike.ch_host', :'ch_host', false);
 
-CREATE SERVER ny_citibike_ingest_svr
-    FOREIGN DATA WRAPPER clickhouse_fdw
-    OPTIONS (host :'ch_host', port '9440', dbname 'ny_citibike',
-             secure 'true', driver 'binary');
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_foreign_server WHERE srvname = 'ny_citibike_ch_svr') THEN
+        EXECUTE format(
+            'CREATE SERVER ny_citibike_ch_svr FOREIGN DATA WRAPPER clickhouse_fdw '
+            'OPTIONS (host %L, port ''8443'', dbname ''ny_citibike'', secure ''true'')',
+            current_setting('citibike.ch_host'));
+    END IF;
+END
+$$;
 
+-- Always refreshed, so a rotated password takes effect on a re-run.
+DROP USER MAPPING IF EXISTS FOR CURRENT_USER SERVER ny_citibike_ch_svr;
 CREATE USER MAPPING FOR CURRENT_USER
-    SERVER ny_citibike_ingest_svr
+    SERVER ny_citibike_ch_svr
     OPTIONS (user :'ch_user', password :'ch_pass');
 
-DROP SCHEMA IF EXISTS ny_citibike_ingest CASCADE;
-CREATE SCHEMA ny_citibike_ingest;
+CREATE SCHEMA IF NOT EXISTS ny_citibike_ch;
+
+DROP FOREIGN TABLE IF EXISTS ny_citibike_ch.gbfs_status, ny_citibike_ch.gbfs_stations;
 
 IMPORT FOREIGN SCHEMA "ny_citibike"
     LIMIT TO (gbfs_status, gbfs_stations)
-    FROM SERVER ny_citibike_ingest_svr
-    INTO ny_citibike_ingest;
+    FROM SERVER ny_citibike_ch_svr
+    INTO ny_citibike_ch;
 
 -- --------------------------------------------------------------------------
 -- Copy forward
@@ -95,14 +111,13 @@ BEGIN
         (station_id, name, short_name, lat, lon, capacity, region_id, geom)
     SELECT station_id, name, short_name, lat, lon, capacity, region_id,
            ST_SetSRID(ST_MakePoint(lon, lat), 4326)
-    FROM ny_citibike_ingest.gbfs_stations
+    FROM ny_citibike_ch.gbfs_stations
     -- 0/0 is not a missing coordinate, it is the Gulf of Guinea.
     WHERE lat <> 0 AND lon <> 0
     ON CONFLICT (station_id) DO UPDATE SET
         name      = EXCLUDED.name,
         capacity  = EXCLUDED.capacity,
-        geom      = EXCLUDED.geom,
-        last_seen = now()
+        geom      = EXCLUDED.geom
     -- Only write the row if something in it actually changed.
     --
     -- Without this WHERE the upsert rewrote all 2,509 stations every minute
@@ -112,10 +127,9 @@ BEGIN
     -- ClickPipes, and left for autovacuum. On the table this workshop describes
     -- as the half that "barely changes".
     --
-    -- The cost was a `last_seen` that ticked forward for untouched rows. It now
-    -- means "when this row's content last changed" rather than "when we last saw
-    -- the station" — and feed freshness was never this column's job anyway:
-    -- station_status.polled_at answers that, once, for the whole feed.
+    -- What made it unconditional was a `last_seen` column that had to tick. That
+    -- column is gone from sql/01-schema.sql: nothing read it, and feed freshness
+    -- is station_status.polled_at anyway — once, for the whole feed.
     WHERE ny_citibike.stations.name     IS DISTINCT FROM EXCLUDED.name
        OR ny_citibike.stations.capacity IS DISTINCT FROM EXCLUDED.capacity
        OR ny_citibike.stations.geom     IS DISTINCT FROM EXCLUDED.geom;
@@ -139,7 +153,7 @@ BEGIN
            g.is_installed::int::boolean,
            g.is_renting::int::boolean,
            g.is_returning::int::boolean
-    FROM ny_citibike_ingest.gbfs_status g
+    FROM ny_citibike_ch.gbfs_status g
     JOIN ny_citibike.stations st ON st.station_id = g.station_id
     WHERE g.polled_at > hwm;
     GET DIAGNOSTICS n = ROW_COUNT;

@@ -37,10 +37,10 @@ namespace instead of `citibike` here and `default` there.
 
 !!! note "Why `_ch` and not just `ny_citibike`"
     The foreign tables live in Postgres too, and the real schema already owns
-    the bare name. `ny_citibike_ch` and `ny_citibike_ingest` from module 03 are
-    both local Postgres schemas holding foreign tables — the suffix says "this is
-    a window onto the other engine", which is the one distinction you actually
-    want visible in a query.
+    the bare name. `ny_citibike_ch` is a local Postgres schema holding foreign
+    tables — the suffix says "this is a window onto the other engine", which is
+    the one distinction you actually want visible in a query. Module 03 already
+    put the two landing tables there; this adds the replicated pair beside them.
 
 !!! warning "The FDW dials outward from the Postgres server"
     Not from your laptop. A ClickHouse running in a container on your machine

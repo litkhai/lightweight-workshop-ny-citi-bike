@@ -204,7 +204,7 @@ def fdw_state(cur):
     `in_schema` is the number of foreign tables in FOREIGN_SCHEMA specifically,
     and `ready` depends on it. A global count is wrong the moment the database
     holds anything else — this workshop's own module 03 adds two foreign tables
-    in ny_citibike_ingest, and a shared service may carry another project's as
+    in ny_citibike_ch, and a shared service may carry another project's as
     well, so "some foreign table exists somewhere" says nothing about whether
     the pushdown schema was imported.
     """
@@ -648,9 +648,20 @@ def checks(cur, state):
                             AND c.relname IN ('stations','station_status')""")),
           "Run sql/01-schema.sql.")
 
-    check("02", "Publication names two tables",
-          lambda: (lambda v: (v[0] == 2, f"{v[0]} table(s) published"))(
-              scalar("SELECT count(*) FROM pg_publication_tables WHERE pubname='ny_citibike_pub'")),
+    # The two core tables must be in it; a third is fine. Module 09 adds sim_trips
+    # to the same publication, so a check for `count = 2` started failing the
+    # moment the optional module ran — reporting a broken publication when nothing
+    # was broken. Assert the names, and list whatever else is there.
+    check("02", "Publication covers both core tables",
+          lambda: (lambda v: (v[0] == 2,
+                              f"stations and station_status: {v[0]} of 2"
+                              + (f"; also {v[1]}" if v[1] else "")))(
+              scalar("""SELECT count(*) FILTER (
+                            WHERE tablename IN ('stations','station_status')),
+                          string_agg(tablename, ', ' ORDER BY tablename) FILTER (
+                            WHERE tablename NOT IN ('stations','station_status'))
+                          FROM pg_publication_tables
+                         WHERE pubname = 'ny_citibike_pub'""")),
           "Run sql/01-schema.sql. ClickPipes needs this in module 05.")
 
     check("03", "pg_cron job is scheduled and active",
@@ -676,10 +687,16 @@ def checks(cur, state):
                          ORDER BY d.runid DESC LIMIT 1""") or (None, None)),
           "Look at return_message in cron.job_run_details — usually the FDW credentials.")
 
+    # By name, not by count. ny_citibike_ch holds the landing tables from module
+    # 03 *and* the replicated ones from module 06, so "how many foreign tables
+    # are in there" is 2, 4 or 5 depending how far you have got — a count would
+    # have started failing the moment the pushdown was wired up.
     check("03", "ClickHouse landing tables are reachable",
-          lambda: (lambda v: (v[0] == 2, f"{v[0]} of 2 foreign tables in ny_citibike_ingest"))(
+          lambda: (lambda v: (v[0] == 2,
+                              f"{v[0]} of 2 landing tables in ny_citibike_ch"))(
               scalar("""SELECT count(*) FROM information_schema.foreign_tables
-                         WHERE foreign_table_schema='ny_citibike_ingest'""")),
+                         WHERE foreign_table_schema = 'ny_citibike_ch'
+                           AND foreign_table_name IN ('gbfs_status','gbfs_stations')""")),
           "Run clickhouse/01-ingest-rmv.sql first, then sql/03-postgres-sync.sql.")
 
     check("03", "Data is arriving",
@@ -850,7 +867,11 @@ class Handler(BaseHTTPRequestHandler):
                           FROM {LOCAL_SCHEMA}.station_status),
                        (SELECT extract(epoch FROM now() - max(polled_at))::int
                           FROM {LOCAL_SCHEMA}.station_status),
-                       current_setting('server_version'),
+                       -- First word only. Debian and Ubuntu packages append their
+                       -- packaging string to server_version, so a card that shows
+                       -- the setting verbatim reads
+                       -- "18.4 (Ubuntu 18.4-1.pgdg22.04+1)".
+                       split_part(current_setting('server_version'), ' ', 1),
                        (SELECT postgis_lib_version())""")
             (stations, rows_est, size, last_poll, behind, pgver, gisver) = cur.fetchone()
 
@@ -911,7 +932,7 @@ class Handler(BaseHTTPRequestHandler):
                 cur.execute("""
                     SELECT to_char(max(polled_at), 'HH24:MI:SS'),
                            extract(epoch FROM now() - max(polled_at))::int
-                      FROM ny_citibike_ingest.gbfs_status""")
+                      FROM ny_citibike_ch.gbfs_status""")
                 pipeline["landing_newest"], pipeline["landing_lag"] = cur.fetchone()
             except Exception:                                      # noqa: BLE001
                 conn.rollback()

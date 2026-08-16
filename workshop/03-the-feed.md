@@ -164,19 +164,20 @@ merge time. No comparison, no bookkeeping — the storage engine absorbs it.
 ```
 
 Two things happen. `pg_clickhouse` imports the landing tables as foreign tables
-into **`ny_citibike_ingest`**, and `pg_cron` schedules a procedure that copies
-new snapshots forward.
+into **`ny_citibike_ch`**, and `pg_cron` schedules a procedure that copies new
+snapshots forward.
 
 The suffix is the point. ClickHouse's database and the Postgres schema are both
 `ny_citibike`, so the foreign tables cannot also be called that locally — the
-real schema already owns the name. `_ingest` marks them for what they are: a
-window onto the other engine, not tables of your own.
+real schema already owns the name. `_ch` marks them for what they are: a window
+onto the other engine, not tables of your own. It is the same schema module 06
+will add the replicated tables to, over the same foreign server.
 
 ```sql
 IMPORT FOREIGN SCHEMA "ny_citibike"          -- the ClickHouse database
     LIMIT TO (gbfs_status, gbfs_stations)
-    FROM SERVER ny_citibike_ingest_svr
-    INTO ny_citibike_ingest;                 -- a local Postgres schema
+    FROM SERVER ny_citibike_ch_svr
+    INTO ny_citibike_ch;                     -- a local Postgres schema
 ```
 
 Then the copy forward:
@@ -186,7 +187,7 @@ SELECT coalesce(max(polled_at), '1970-01-01') INTO hwm
   FROM ny_citibike.station_status;
 
 INSERT INTO ny_citibike.station_status (…)
-SELECT … FROM ny_citibike_ingest.gbfs_status g
+SELECT … FROM ny_citibike_ch.gbfs_status g
 JOIN ny_citibike.stations st ON st.station_id = g.station_id
 WHERE g.polled_at > hwm;
 ```
@@ -209,7 +210,7 @@ Citi Bike GBFS
 ClickHouse Cloud   database ny_citibike     refreshable MV, every minute
      gbfs_status                            ← landing
      │
-     │  ny_citibike_ingest.gbfs_status      ← foreign table, local name
+     │  ny_citibike_ch.gbfs_status      ← foreign table, local name
      ▼
 Managed Postgres   schema ny_citibike       pg_cron, every minute
      stations                               ← PostGIS geometry

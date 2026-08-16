@@ -26,22 +26,71 @@ ClickHouse, `pg_clickhouse` bringing them back into the Postgres session as
 foreign tables, and the query planner deciding what runs where. The join key is
 a `bigint`, so no geometry ever has to cross.
 
-## The names, up front
+## The names, up front {: #names }
 
-Everything lives under one namespace name, spelled the same on both engines:
+**There are two.** Every object in this workshop lives under one of them.
 
-| | Where | What |
+| Name | Where it lives | What is in it |
 |---|---|---|
-| `ny_citibike` | Postgres **schema** | the real tables. Geometry lives here |
-| `ny_citibike` | ClickHouse **database** | landing tables, plus the CDC mirror |
-| `ny_citibike_ingest` | Postgres schema | foreign tables over ClickHouse's landing tables |
-| `ny_citibike_ch` | Postgres schema | foreign tables over ClickHouse's mirror |
+| `ny_citibike` | Postgres **schema** *and* ClickHouse **database** | the real tables, on both engines |
+| `ny_citibike_ch` | Postgres schema | foreign tables — ClickHouse, seen from inside Postgres |
 
-The first two share a name deliberately. `ny_citibike.station_status` refers to
-the same data whichever engine you ask, so the only difference between a local
-query and a pushed-down one is a prefix — and when the verdict changes you know
-the query text did not. The two suffixed schemas are both local, and the suffix
-is there because the real schema already owns the bare name.
+### Why the first name is used twice
+
+Postgres calls a namespace a schema and ClickHouse calls it a database, but they
+are the same idea, so they get the same name. A table then has the **same
+qualified name wherever it lives**:
+
+```text
+ny_citibike.station_status      in Postgres   … and in ClickHouse
+```
+
+That is not tidiness. In [module 06](06-pushdown.md) you send one query text to
+both engines, and the only thing that differs is a schema prefix. If the names had
+drifted — `citibike` here, `default` there — a changed result could always have
+been a different table rather than a different engine.
+
+### Why the second name exists at all
+
+The foreign tables live in Postgres too, and the real schema already owns the bare
+name; two schemas cannot share one. So they take a suffix, and the pairing reads:
+
+```text
+ny_citibike.station_status      the real table
+ny_citibike_ch.station_status   the same rows, fetched from ClickHouse
+```
+
+`_ch` is the only suffix in the workshop. It marks **a window onto the other
+engine**, which is the one distinction you want visible in a query.
+
+Every table on both engines, what writes it and what it joins to, is laid out in
+the [data model reference](data-model.md).
+
+### One server, four foreign tables
+
+`ny_citibike_ch` is filled in twice, by the two modules that need it, over a
+single foreign server:
+
+| Foreign table | Imported by | Points at |
+|---|---|---|
+| `gbfs_status`, `gbfs_stations` | module 03 | the landing tables `url()` writes |
+| `stations`, `station_status` | module 06 | the CDC mirror ClickPipes writes |
+| `sim_trips` | module 06, if you ran [09](09-trips.md) | the generated trip table |
+
+There used to be a second server and a third schema — `ny_citibike_ingest_svr`
+and `ny_citibike_ingest` — on the theory that ingestion and measurement deserved
+separate plumbing. Once both sides were named `ny_citibike` they were pointing at
+the same database over two protocols, and one server reads both sets perfectly
+well. The second one bought nothing and cost a duplicate copy of the ClickHouse
+password and a third name to explain.
+
+!!! note "Renaming the workshop"
+    Everything above is derived from one string. To use a different name, change
+    `LOCAL_SCHEMA` in `.env`, the `CREATE SCHEMA` in `sql/01-schema.sql`, the
+    `CREATE DATABASE` in `clickhouse/01-ingest-rmv.sql`, and keep the `_ch`
+    suffix consistent. The workshop does not template it, because a schema name
+    interpolated into a hundred places is harder to read than a name you can
+    grep.
 
 ## Modules
 
@@ -68,8 +117,10 @@ the clock cannot tell you anything.
 Two ways to get timings that do mean something. Leave the pg_cron job running
 overnight and come back to 3.6M rows. Or run the optional
 [module 09](09-trips.md), whose generated trip table reaches ten million rows in
-a quarter of an hour — where the same aggregate takes 12 seconds locally against
-0.17 for the small one, and the badge and the stopwatch finally agree.
+a quarter of an hour. Measured there: the same aggregate text takes **10.4 s**
+against the local schema and **0.47 s** against the foreign one — 22x, on one
+changed prefix. That is the point at which the badge and the stopwatch finally
+agree, and it is worth reaching if you have the fifteen minutes.
 
 ## What you will be able to say afterwards
 

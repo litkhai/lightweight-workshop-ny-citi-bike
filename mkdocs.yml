@@ -66,6 +66,7 @@ nav:
       - "06 · Push the counting down": 06-pushdown.md
       - "07 · The dashboard": 07-dashboard.md
       - "08 · Wrap-up and teardown": 08-wrap-up.md
+      - "Data model reference": data-model.md
   - Extras:
       - "09 · Trips, generated": 09-trips.md
   - Operations:

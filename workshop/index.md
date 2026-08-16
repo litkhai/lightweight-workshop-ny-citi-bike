@@ -25,7 +25,7 @@ Citi Bike GBFS            public JSON, no API key, ~2,500 stations, refreshed ev
       ▼
 ClickHouse Cloud          database ny_citibike
       gbfs_status                                  ← landing
-      │  ny_citibike_ingest.gbfs_status  +  pg_cron, every minute
+      │  ny_citibike_ch.gbfs_status  +  pg_cron, every minute
       ▼
 ClickHouse Managed Postgres   schema ny_citibike
       stations              PostGIS points  · 2,500 rows  · barely changes
@@ -44,6 +44,9 @@ Dashboard (Docker) — badges every query with the engine that answered
 ```
 
 ## Start here
+
+The [data model reference](data-model.md) is the page to keep open: every table on
+both engines, what writes it, what reads it, and the five routes between them.
 
 New participants begin with [Prerequisites](00-prerequisites.md) and work
 through in order. Each module states what it needs from the previous one, so

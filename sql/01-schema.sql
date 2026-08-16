@@ -34,16 +34,15 @@ CREATE TABLE IF NOT EXISTS ny_citibike.stations (
 
     -- Built from lat/lon on load. This column is the reason the geometry side
     -- cannot move: ClickHouse has no equivalent type.
-    geom          geometry(Point, 4326),
+    geom          geometry(Point, 4326)
 
-    first_seen    timestamptz NOT NULL DEFAULT now(),
-
-    -- When this row's *content* last changed, not when the station was last in
-    -- the feed. The sync in sql/03-postgres-sync.sql skips rows whose values are
-    -- unchanged, because touching all 2,509 every minute cost 3.6M no-op writes
-    -- a day for a timestamp nobody reads. Feed freshness is
-    -- station_status.polled_at.
-    last_seen     timestamptz NOT NULL DEFAULT now()
+    -- Deliberately no first_seen/last_seen.
+    --
+    -- They were here, nothing ever read them, and last_seen actively cost
+    -- something: keeping it current meant the sync rewrote all 2,509 rows every
+    -- minute, 3.6M no-op writes a day of WAL and replication, on the table this
+    -- workshop introduces as the half that barely changes. Feed freshness is
+    -- station_status.polled_at, once, for the whole feed.
 );
 
 CREATE INDEX IF NOT EXISTS stations_geom_gix ON ny_citibike.stations USING GIST (geom);
