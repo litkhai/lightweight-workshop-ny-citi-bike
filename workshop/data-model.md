@@ -46,7 +46,9 @@ to. Read [the naming rule](workshop-overview.md#names) first if you have not.
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-Routes ① to ④ move rows. **Route ⑤ does not** — it is a query path, and the section on it explains why that distinction matters more than any other on this page.
+Routes ① to ④ move rows. **Route ⑤ does not** — it is a query path, and the
+section on it explains why that distinction matters more than any other on this
+page.
 
 `station_status` makes a round trip: ClickHouse → Postgres → ClickHouse. That is
 route ② followed by route ④, and it is the single most confusing thing here.
@@ -76,8 +78,16 @@ is.
 
 **`gbfs_stations` vs `stations`.** The former is the raw dimension as published,
 replaced hourly. The latter is Postgres's version of it, with `station_key` and
-`geom` added — and `geom` is **not** in the ClickHouse copy, because ClickHouse has
-no geometry type. That absence is the workshop's premise.
+`geom` added.
+
+And `geom` is worth being precise about, because the obvious claim is wrong.
+ClickPipes replicates every column, so it **did** cross — as `text`, since
+ClickHouse has no geometry type. What crossed is a string that looks like a
+geometry: no GiST index, no `ST_*` without a per-row cast, and identical in a
+`SELECT` to the real thing. Silently slower and indistinguishable is worse than
+absent, so `sql/40-fdw-clickhouse.sql` drops the column from the *foreign table*
+after importing it. Reaching for `geom` through `ny_citibike_ch` now says "column
+does not exist", which is the honest answer and also the workshop's premise.
 
 ### Why `ReplacingMergeTree` twice, for different reasons
 
